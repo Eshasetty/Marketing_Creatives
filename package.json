@@ -4,7 +4,7 @@
   "description": "Backend for the Strategic Poster AI Assistant",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "server.js"
   },
   "author": "",
   "license": "ISC",
