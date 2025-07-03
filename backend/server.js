@@ -1,4 +1,4 @@
-// server.js (Complete Fixed Version)
+// server.js (Modified Version - Single Approach with User Input)
 
 const express = require('express');
 const cors = require('cors');
@@ -70,7 +70,7 @@ async function findSimilarCampaigns(description) {
   
       if (campaignError || !campaigns?.length) {
         console.warn("⚠️ No campaigns found in Supabase.");
-        return { similarCampaigns: [], similarCreatives: [] };
+        return [];
       }
   
       // 3. Cosine similarity helper
@@ -89,11 +89,11 @@ async function findSimilarCampaigns(description) {
       }).filter(Boolean)
         .filter(c => c.similarity > 0.2)
         .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, 3);
+        .slice(0, 5); // Get top 5 for more inspiration
   
       if (!similarities.length) {
         console.log("📉 No similar campaigns found above threshold.");
-        return { similarCampaigns: [], similarCreatives: [] };
+        return [];
       }
   
       // 5. Get corresponding creatives
@@ -106,59 +106,65 @@ async function findSimilarCampaigns(description) {
   
       if (creativesError) {
         console.error("⚠️ Error fetching creatives:", creativesError.message);
+        return [];
       }
   
-      // 6. Log similarity + creative match
-      console.log("\n🎯 Top 3 Similar Campaigns:\n");
+      // 6. Combine similar campaigns with their creatives
+      const combinedData = similarities.map(campaign => {
+        const creative = creatives?.find(cr => String(cr.campaign_id) === String(campaign.campaign_id));
+        return {
+          ...campaign,
+          creative: creative || null
+        };
+      }).filter(item => item.creative !== null);
   
-      similarities.forEach((c, i) => {
-        const creative = creatives?.find(cr => String(cr.campaign_id) === String(c.campaign_id));
-        console.log(`${i + 1}. "${c.campaign_prompt}" (${(c.similarity * 100).toFixed(2)}%)`);
-        if (creative) {
-          console.log(`   • Background: ${JSON.stringify(creative.background)}`);
-          console.log(`   • Layout: ${creative.layout_grid}`);
-          console.log(`   • CTA: ${JSON.stringify(creative.cta_buttons)}`);
-        } else {
-          console.log(`   ⚠️ No creative found for campaign ID ${c.campaign_id}`);
-        }
+      // 7. Log similarity + creative match
+      console.log("\n🎯 Similar Campaigns Found for Inspiration:\n");
+  
+      combinedData.forEach((item, i) => {
+        console.log(`${i + 1}. "${item.campaign_prompt}" (${(item.similarity * 100).toFixed(2)}%)`);
+        console.log(`   • Background: ${JSON.stringify(item.creative.background)}`);
+        console.log(`   • Layout: ${item.creative.layout_grid}`);
+        console.log(`   • CTA: ${JSON.stringify(item.creative.cta_buttons)}`);
         console.log();
       });
   
-      return {
-        similarCampaigns: similarities,
-        similarCreatives: creatives?.filter(c =>
-          campaignIds.includes(c.campaign_id)
-        ) || []
-      };
+      console.log(`✅ Will use ALL ${combinedData.length} similar creatives as inspiration for 1 new creative\n`);
+  
+      return combinedData;
   
     } catch (err) {
       console.error("❌ Error in findSimilarCampaigns:", err.message);
-      return { similarCampaigns: [], similarCreatives: [] };
+      return [];
     }
   }
   
   
-// STEP 2: Generate creative directions (FIXED VERSION)
+// STEP 2: Generate creative directions (MODIFIED - Single Approach)
 async function generateCreativeDirections(campaignPrompt, similarCreatives = []) {
   try {
-    console.log(`🎯 Generating creative directions with ${similarCreatives.length} similar creatives`);
+    console.log(`🎯 Generating creative direction using ${similarCreatives.length} similar creatives as inspiration`);
 
     // Format similar creatives for the prompt
     const similarCreativeText = similarCreatives.length > 0
-      ? similarCreatives.map((c, i) => {
+      ? similarCreatives.map((item, i) => {
+          const c = item.creative;
           return `Similar Creative ${i + 1}:\n` +
-                 `Title: ${c.title || 'N/A'}\n` +
-                 `Subtitle: ${c.subtitle || 'N/A'}\n` +
-                 `Background Description: ${c.background?.description?.trim || '(none)'}\n` +
+                 `Campaign: "${item.campaign_prompt}" (${(item.similarity * 100).toFixed(1)}% match)\n` +
+                 `Title: ${c.text_blocks?.[0]?.text || 'N/A'}\n` +
+                 `Subtitle: ${c.text_blocks?.[1]?.text || 'N/A'}\n` +
+                 `Background: ${c.background?.type || 'N/A'} - ${c.background?.description || c.background?.color || 'N/A'}\n` +
                  `Layout: ${c.layout_grid || 'N/A'}\n` +
                  `Placement: ${c.placement || 'N/A'}\n` +
                  `Format: ${c.format || 'N/A'}\n` +
                  `CTA Button: ${c.cta_buttons?.[0]?.text || 'N/A'}`;
         }).join('\n\n')
-      : 'No similar creatives found. Create original approaches.';
+      : 'No similar creatives found. Create original approach.';
 
     console.log("📝 Similar creatives context:", similarCreativeText);
-    
+
+    // Build the user message
+    let userMessage = `Here is a campaign prompt:\n${campaignPrompt}\n\nHere are similar creatives from past campaigns to use as inspiration (create 1 new creative inspired by ALL of these):\n${similarCreativeText}`;
     
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
@@ -169,16 +175,17 @@ async function generateCreativeDirections(campaignPrompt, similarCreatives = [])
           content: `
 You are a creative assistant for ad design.
 
-Return 3 unique creative approaches using the exact format below. Use all fields. You may repeat fields like CTA or Subtitle if needed. If something doesn't apply, leave it blank.
+Return 1 unique creative approach using the exact format below. Use all fields. If something doesn't apply, leave it blank.
 
 In the Background Description:
 - ONLY describe what visually appears: people, locations, objects, colors, textures, composition, lighting, style (e.g. realistic, flat)
 - Do NOT use mood words like "inviting", "urgent", "exclusive", etc.
-- Match the visual style of similar creatives if present. For example, if most similar campaigns use photo backgrounds with people or scenery, follow that pattern and same with solid colors or scenary.
+- Match the visual style of similar creatives if present. For example, if most similar campaigns use photo backgrounds with people or scenery, follow that pattern and same with solid colors or scenery.
 - Avoid cluttered or overly busy backgrounds. Simpler compositions are preferred, but don't omit scenery if it's in the examples.
-Each approach should follow this format exactly:
 
-APPROACH 1:
+Follow this format exactly:
+
+APPROACH:
 Title: [headline]
 Subtitle: [subheadline]
 CTA Button: [text]
@@ -204,24 +211,18 @@ Decorative Element Color: [hex]
 Legal Disclaimer: 
 Slogan: 
 
-Only return the 3 approaches. No extra explanation.
+Only return the approach. No extra explanation.
           `.trim()
         },
         {
           role: "user",
-          content: `
-Here is a new campaign prompt:
-${campaignPrompt}
-
-Here are similar creatives from past campaigns for inspiration:
-${similarCreativeText}
-          `.trim()
+          content: userMessage
         }
       ]
     });
 
     const result = completion.choices[0].message.content;
-    console.log("✅ Creative directions generated successfully");
+    console.log("✅ Creative direction generated successfully");
     return result;
 
   } catch (error) {
@@ -230,7 +231,7 @@ ${similarCreativeText}
   }
 }
 
-// STEP 3: Save campaign and creatives (Keep your existing function)
+// STEP 3: Save campaign and creatives (MODIFIED - Single Approach)
 async function saveCampaignPromptAndCreatives(prompt, aiText) {
     try {
       // Step 1: Embed prompt
@@ -254,133 +255,124 @@ async function saveCampaignPromptAndCreatives(prompt, aiText) {
       const campaign_id = campaignInsert[0].campaign_id;
       console.log("✅ Campaign saved with ID:", campaign_id);
   
-      // Step 3: Parse AI output
-      const approaches = aiText
-        .split(/APPROACH \d:/i)
-        .map(x => x.trim())
-        .filter(Boolean);
+      // Step 3: Parse AI output - now expecting only 1 approach
+      const approachText = aiText.replace(/^APPROACH:?\s*/i, '').trim();
+      const lines = approachText.split("\n").map(l => l.trim()).filter(Boolean);
   
       const parseField = (lines, label) => {
         const line = lines.find(l => l.toLowerCase().startsWith(label.toLowerCase() + ":"));
         return line ? line.split(":").slice(1).join(":").trim() : null;
       };
   
-      const savedCreatives = [];
-  
-      for (let i = 0; i < approaches.length; i++) {
-        const lines = approaches[i].split("\n").map(l => l.trim()).filter(Boolean);
-  
-        const dimensionsStr = parseField(lines, "Dimensions");
-        const widthHeight = dimensionsStr?.split("x").map(x => parseInt(x.trim()));
-        const dimensions = widthHeight?.length === 2 && !isNaN(widthHeight[0]) && !isNaN(widthHeight[1])
-          ? { width: widthHeight[0], height: widthHeight[1] }
-          : { width: 1080, height: 1920 };
-  
-        // Parse font weight safely
-        const fontWeightStr = parseField(lines, "Font Weight");
-        const fontWeight = fontWeightStr ? parseInt(fontWeightStr) : 400;
-        const safeFontWeight = !isNaN(fontWeight) ? fontWeight : 400;
+      const dimensionsStr = parseField(lines, "Dimensions");
+      const widthHeight = dimensionsStr?.split("x").map(x => parseInt(x.trim()));
+      const dimensions = widthHeight?.length === 2 && !isNaN(widthHeight[0]) && !isNaN(widthHeight[1])
+        ? { width: widthHeight[0], height: widthHeight[1] }
+        : { width: 1080, height: 1920 };
 
-        // Validate layout_grid against schema constraints
-        const rawLayout = parseField(lines, "Layout") || "free";
-        const validLayouts = ["free", "2-col", "3-col", "golden-ratio"];
-        const layout_grid = validLayouts.includes(rawLayout) ? rawLayout : "free";
+      // Parse font weight safely
+      const fontWeightStr = parseField(lines, "Font Weight");
+      const fontWeight = fontWeightStr ? parseInt(fontWeightStr) : 400;
+      const safeFontWeight = !isNaN(fontWeight) ? fontWeight : 400;
 
-        // Validate format against schema constraints  
-        const rawFormat = parseField(lines, "Format") || "";
-        const cleanedFormat = rawFormat.trim().toLowerCase();
-        const validFormats = ["static", "gif", "video", "html5"];
-        const format = validFormats.includes(cleanedFormat) ? cleanedFormat : "static";
-  
-        const textBlock = {
-          type: "headline",
-          text: parseField(lines, "Title") || "",
-          font_family: parseField(lines, "Font Family") || "Arial",
-          font_weight: safeFontWeight,
-          color: parseField(lines, "Text Color") || "#000000",
-          alignment: parseField(lines, "Text Alignment") || "left",
-          case_style: parseField(lines, "Case Style") || "sentence"
-        };
-  
-        const creative = {
-          campaign_id,
-          placement: parseField(lines, "Placement") || "homepage",
-          dimensions,
-          format,
-          background: {
-            color: parseField(lines, "Background Color") || "#ffffff",
-            type: parseField(lines, "Background Type") || "solid",
-            description: parseField(lines, "Background Description") || ""
-          },
-          layout_grid,
-          bleed_safe_margins: null,
-          imagery: null, // Will be populated after image generation
-          text_blocks: [
-            textBlock, 
-            {
-              type: "subhead",
-              text: parseField(lines, "Subtitle") || "",
-              font_family: parseField(lines, "Font Family") || "Arial",
-              font_weight: safeFontWeight,
-              color: parseField(lines, "Text Color") || "#000000",
-              alignment: parseField(lines, "Text Alignment") || "left",
-              case_style: parseField(lines, "Case Style") || "sentence"
-            }
-          ],
-          cta_buttons: [{
-            text: parseField(lines, "CTA Button") || "",
-            url: parseField(lines, "CTA URL") || "",
-            style: parseField(lines, "CTA Style") || "primary",
-            bg_color: parseField(lines, "CTA BG Color") || "#007bff",
-            text_color: parseField(lines, "CTA Text Color") || "#ffffff"
-          }],
-          brand_logo: {
-            text_alt: parseField(lines, "Brand Logo Alt Text") || "Brand Logo"
-          },
-          brand_colors: ["#000000"],
-          slogan: parseField(lines, "Slogan") || null,
-          legal_disclaimer: parseField(lines, "Legal Disclaimer") || null,
-          decorative_elements: [{
-            shape_type: parseField(lines, "Decorative Element Shape") || "line",
-            color: parseField(lines, "Decorative Element Color") || "#cccccc"
-          }]
-        };
-  
-        // Clean undefined values
-        const cleanedCreative = JSON.parse(JSON.stringify(creative, (key, value) =>
-          value === undefined ? null : value
-        ));
-  
-        console.log(`🔍 Attempting to save creative ${i + 1}:`, JSON.stringify(cleanedCreative, null, 2));
-  
-        const { data, error } = await supabase
-          .from("creatives_duplicate")
-          .insert([cleanedCreative])
-          .select();
-          
-        if (error) {
-          console.error(`❌ Creative ${i + 1} insert error:`, error);
-          console.error("❌ Error details:", JSON.stringify(error, null, 2));
-        } else {
-          console.log(`✅ Creative ${i + 1} saved successfully.`);
-          savedCreatives.push(data[0]);
-        }
-      }
-  
-      return {
-        campaign_id,
-        creatives: savedCreatives
+      // Validate layout_grid against schema constraints
+      const rawLayout = parseField(lines, "Layout") || "free";
+      const validLayouts = ["free", "2-col", "3-col", "golden-ratio"];
+      const layout_grid = validLayouts.includes(rawLayout) ? rawLayout : "free";
+
+      // Validate format against schema constraints  
+      const rawFormat = parseField(lines, "Format") || "";
+      const cleanedFormat = rawFormat.trim().toLowerCase();
+      const validFormats = ["static", "gif", "video", "html5"];
+      const format = validFormats.includes(cleanedFormat) ? cleanedFormat : "static";
+
+      const textBlock = {
+        type: "headline",
+        text: parseField(lines, "Title") || "",
+        font_family: parseField(lines, "Font Family") || "Arial",
+        font_weight: safeFontWeight,
+        color: parseField(lines, "Text Color") || "#000000",
+        alignment: parseField(lines, "Text Alignment") || "left",
+        case_style: parseField(lines, "Case Style") || "sentence"
       };
-  
+
+      const creative = {
+        campaign_id,
+        placement: parseField(lines, "Placement") || "homepage",
+        dimensions,
+        format,
+        background: {
+          color: parseField(lines, "Background Color") || "#ffffff",
+          type: parseField(lines, "Background Type") || "solid",
+          description: parseField(lines, "Background Description") || ""
+        },
+        layout_grid,
+        bleed_safe_margins: null,
+        imagery: null, // Will be populated after image generation
+        text_blocks: [
+          textBlock, 
+          {
+            type: "subhead",
+            text: parseField(lines, "Subtitle") || "",
+            font_family: parseField(lines, "Font Family") || "Arial",
+            font_weight: safeFontWeight,
+            color: parseField(lines, "Text Color") || "#000000",
+            alignment: parseField(lines, "Text Alignment") || "left",
+            case_style: parseField(lines, "Case Style") || "sentence"
+          }
+        ],
+        cta_buttons: [{
+          text: parseField(lines, "CTA Button") || "",
+          url: parseField(lines, "CTA URL") || "",
+          style: parseField(lines, "CTA Style") || "primary",
+          bg_color: parseField(lines, "CTA BG Color") || "#007bff",
+          text_color: parseField(lines, "CTA Text Color") || "#ffffff"
+        }],
+        brand_logo: {
+          text_alt: parseField(lines, "Brand Logo Alt Text") || "Brand Logo"
+        },
+        brand_colors: ["#000000"],
+        slogan: parseField(lines, "Slogan") || null,
+        legal_disclaimer: parseField(lines, "Legal Disclaimer") || null,
+        decorative_elements: [{
+          shape_type: parseField(lines, "Decorative Element Shape") || "line",
+          color: parseField(lines, "Decorative Element Color") || "#cccccc"
+        }]
+      };
+
+      // Clean undefined values
+      const cleanedCreative = JSON.parse(JSON.stringify(creative, (key, value) =>
+        value === undefined ? null : value
+      ));
+
+      console.log(`🔍 Attempting to save creative:`, JSON.stringify(cleanedCreative, null, 2));
+
+      const { data, error } = await supabase
+        .from("creatives_duplicate")
+        .insert([cleanedCreative])
+        .select();
+        
+      if (error) {
+        console.error(`❌ Creative insert error:`, error);
+        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+        throw error;
+      } else {
+        console.log(`✅ Creative saved successfully.`);
+        return {
+          campaign_id,
+          creative: data[0]
+        };
+      }
+
     } catch (err) {
-      console.error("❌ Failed to save campaign and creatives:", err);
+      console.error("❌ Failed to save campaign and creative:", err);
       throw err; // Re-throw to be caught by endpoint
     }
 }
 
-// MAIN ENDPOINT: End-to-end with Image Generation (FIXED VERSION)
+// MAIN ENDPOINT: Generate initial approach
 app.post('/api/generate', async (req, res) => {
-  const { campaignPrompt, generateImages = true } = req.body;
+  const { campaignPrompt } = req.body;
   
   if (!campaignPrompt) {
     return res.status(400).json({ error: "campaignPrompt is required" });
@@ -389,44 +381,23 @@ app.post('/api/generate', async (req, res) => {
   try {
     console.log("🔍 Starting generation for prompt:", campaignPrompt);
     
-    // Step 1: Find similar creatives
+    // Step 1: Find similar creatives (returns combined data)
     const similarCreatives = await findSimilarCampaigns(campaignPrompt);
-    console.log(`✅ Found ${similarCreatives.length} similar creatives`);
+    console.log(`✅ Found ${similarCreatives.length} similar creatives to use as inspiration`);
 
-    // Step 2: Generate creative directions using similar creatives
+    // Step 2: Generate creative direction using ALL similar creatives as inspiration
     const aiText = await generateCreativeDirections(campaignPrompt, similarCreatives);
     console.log("✅ Generated AI text:", aiText ? "Success" : "Failed");
     
     if (!aiText) {
-      return res.status(500).json({ error: "Failed to generate creative directions" });
-    }
-
-    // Step 3: Save campaign and creatives
-    const result = await saveCampaignPromptAndCreatives(campaignPrompt, aiText);
-    console.log("✅ Save result:", result);
-
-    // Step 4: Generate images if requested
-    let imageResults = [];
-    if (generateImages && process.env.REPLICATE_API_TOKEN && result.creatives.length > 0) {
-      console.log("🎨 Starting image generation...");
-      try {
-        imageResults = await generateImagesForCreatives(result.creatives);
-        console.log(`✅ Image generation completed: ${imageResults.length} results`);
-      } catch (imageError) {
-        console.error("❌ Image generation failed:", imageError.message);
-        // Don't fail the whole request if image generation fails
-      }
+      return res.status(500).json({ error: "Failed to generate creative direction" });
     }
 
     res.json({
-      message: "Campaign and creatives saved.",
-      campaign_id: result.campaign_id,
-      creatives_count: result.creatives.length,
-      creatives: result.creatives,
+      message: "Creative approach generated. Review and modify if needed.",
+      aiText,
       similar_creatives_found: similarCreatives.length,
-      image_results: imageResults,
-      images_generated: imageResults.filter(r => r.success).length,
-      aiText, // send raw AI output to see all 3 approaches
+      ready_to_save: true
     });
 
   } catch (err) {
@@ -438,7 +409,136 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
-// New endpoint: Generate images for existing creatives
+// NEW ENDPOINT: Modify the generated approach
+app.post('/api/modify', async (req, res) => {
+  const { originalAiText, modifications } = req.body;
+  
+  if (!originalAiText || !modifications) {
+    return res.status(400).json({ error: "originalAiText and modifications are required" });
+  }
+
+  try {
+    console.log("🔄 Modifying existing approach");
+    console.log("🔄 User modifications:", modifications);
+    
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      temperature: 0.7,
+      messages: [
+        {
+          role: "system",
+          content: `
+You are a creative assistant for ad design. You will receive an existing creative approach and modification requests.
+
+Apply the requested modifications to the existing approach while keeping the same format. Only change the fields that are mentioned in the modifications.
+
+Return the modified approach using the exact same format as the original:
+
+APPROACH:
+Title: [headline]
+Subtitle: [subheadline]
+CTA Button: [text]
+CTA URL: [url]
+CTA Style: [primary / secondary / ghost]
+CTA BG Color: [hex]
+CTA Text Color: [hex]
+Background Color: [hex]
+Background Type: [photo / solid / gradient / textured]
+Background Description: [detailed visual description]
+Brand Logo Alt Text: [alt text]
+Layout: [free / 2-col / 3-col / golden-ratio]
+Placement: [homepage / email / app / social]
+Format: [static / gif / video / html5]
+Dimensions: [width]x[height]
+Font Family: [font name]
+Font Weight: [number]
+Text Color: [hex]
+Text Alignment: [left / center / right]
+Case Style: [sentence / upper / title]
+Decorative Element Shape: [line / blob / sticker]
+Decorative Element Color: [hex]
+Legal Disclaimer: 
+Slogan: 
+
+Only return the modified approach. No extra explanation.
+          `.trim()
+        },
+        {
+          role: "user",
+          content: `Here is the existing creative approach:\n${originalAiText}\n\nPlease apply these modifications:\n${modifications}`
+        }
+      ]
+    });
+
+    const result = completion.choices[0].message.content;
+    
+    if (!result) {
+      return res.status(500).json({ error: "Failed to generate modified creative direction" });
+    }
+
+    res.json({
+      message: "Creative approach modified successfully.",
+      aiText: result,
+      modifications_applied: modifications,
+      ready_to_save: true
+    });
+
+  } catch (err) {
+    console.error("❌ Error in /api/modify:", err);
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      details: err.message 
+    });
+  }
+});
+
+// NEW ENDPOINT: Save the finalized approach
+app.post('/api/save', async (req, res) => {
+  const { campaignPrompt, aiText, generateImages = true } = req.body;
+  
+  if (!campaignPrompt || !aiText) {
+    return res.status(400).json({ error: "campaignPrompt and aiText are required" });
+  }
+
+  try {
+    console.log("💾 Saving finalized approach");
+    
+    // Step 1: Save campaign and creative
+    const result = await saveCampaignPromptAndCreatives(campaignPrompt, aiText);
+    console.log("✅ Save result:", result);
+
+    // Step 2: Generate images if requested
+    let imageResults = [];
+    if (generateImages && process.env.REPLICATE_API_TOKEN && result.creative) {
+      console.log("🎨 Starting image generation...");
+      try {
+        imageResults = await generateImagesForCreatives([result.creative]);
+        console.log(`✅ Image generation completed: ${imageResults.length} results`);
+      } catch (imageError) {
+        console.error("❌ Image generation failed:", imageError.message);
+        // Don't fail the whole request if image generation fails
+      }
+    }
+
+    res.json({
+      message: "Campaign and creative saved successfully.",
+      campaign_id: result.campaign_id,
+      creative: result.creative,
+      image_results: imageResults,
+      images_generated: imageResults.filter(r => r.success).length,
+      aiText
+    });
+
+  } catch (err) {
+    console.error("❌ Error in /api/save:", err);
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      details: err.message 
+    });
+  }
+});
+
+// Existing endpoint: Generate images for existing creatives
 app.post('/api/generate-images', async (req, res) => {
   const { campaign_id } = req.body;
   
