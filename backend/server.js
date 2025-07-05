@@ -493,50 +493,73 @@ Only return the modified approach. No extra explanation.
 });
 
 // NEW ENDPOINT: Save the finalized approach
+// NEW ENDPOINT: Save the finalized approach
 app.post('/api/save', async (req, res) => {
-  const { campaignPrompt, aiText, generateImages = true } = req.body;
-  
-  if (!campaignPrompt || !aiText) {
-    return res.status(400).json({ error: "campaignPrompt and aiText are required" });
-  }
-
-  try {
-    console.log("💾 Saving finalized approach");
+    const { campaignPrompt, aiText, generateImages = true } = req.body;
     
-    // Step 1: Save campaign and creative
-    const result = await saveCampaignPromptAndCreatives(campaignPrompt, aiText);
-    console.log("✅ Save result:", result);
-
-    // Step 2: Generate images if requested
-    let imageResults = [];
-    if (generateImages && process.env.REPLICATE_API_TOKEN && result.creative) {
-      console.log("🎨 Starting image generation...");
-      try {
-        imageResults = await generateImagesForCreatives([result.creative]);
-        console.log(`✅ Image generation completed: ${imageResults.length} results`);
-      } catch (imageError) {
-        console.error("❌ Image generation failed:", imageError.message);
-        // Don't fail the whole request if image generation fails
-      }
+    if (!campaignPrompt || !aiText) {
+      return res.status(400).json({ error: "campaignPrompt and aiText are required" });
     }
-
-    res.json({
-      message: "Campaign and creative saved successfully.",
-      campaign_id: result.campaign_id,
-      creative: result.creative,
-      image_results: imageResults,
-      images_generated: imageResults.filter(r => r.success).length,
-      aiText
-    });
-
-  } catch (err) {
-    console.error("❌ Error in /api/save:", err);
-    res.status(500).json({ 
-      error: "Internal Server Error", 
-      details: err.message 
-    });
-  }
-});
+  
+    try {
+      console.log("💾 Saving finalized approach");
+      
+      // Step 1: Save campaign and creative data to DB
+      // This function will parse the aiText and save the creative,
+      // returning the saved creative object (without the aiText string itself).
+      const saveResult = await saveCampaignPromptAndCreatives(campaignPrompt, aiText);
+      console.log("✅ Creative data saved to DB. Result:", saveResult);
+  
+      // Step 2: Generate images if requested and Replicate token is available
+      let imageResults = [];
+      if (generateImages && process.env.REPLICATE_API_TOKEN && saveResult.creative) {
+        console.log("🎨 Starting image generation...");
+        try {
+          // Construct the object exactly as generateImagesForCreatives expects it:
+          // It needs both the creative_id (from the DB save) AND the original aiText.
+          const creativeForImageGen = {
+            creative_id: saveResult.creative.creative_id, // Get the ID from the newly saved creative
+            aiText: aiText // <<< IMPORTANT: Pass the original aiText from the request body here!
+          };
+          
+          // Call the batch image generation function with our single prepared creative
+          imageResults = await generateImagesForCreatives([creativeForImageGen]);
+          console.log(`✅ Image generation completed: ${imageResults.length} results`);
+  
+          // The `generateImagesForCreatives` function already handles updating the DB's `imagery` column.
+          // We just need to capture its results for the API response.
+  
+        } catch (imageError) {
+          console.error("❌ Image generation failed at /api/save:", imageError.message);
+          // Continue, don't block the entire response, but flag the error
+          imageResults = [{ success: false, error: imageError.message, creative_id: saveResult.creative.creative_id }];
+        }
+      } else if (!generateImages) {
+          console.log("ℹ️ Image generation explicitly skipped as per request.");
+      } else if (!process.env.REPLICATE_API_TOKEN) {
+          console.warn("⚠️ REPLICATE_API_TOKEN not found, skipping image generation.");
+      } else if (!saveResult.creative) {
+          console.warn("⚠️ Creative object not returned from save operation, skipping image generation.");
+      }
+  
+  
+      res.json({
+        message: "Campaign and creative saved successfully.",
+        campaign_id: saveResult.campaign_id,
+        creative: saveResult.creative, // This is the initially saved creative object from DB
+        image_generation_status: imageResults.length > 0 ? imageResults[0].success : false, // Check success of the first (and only) creative
+        image_results: imageResults,
+        aiText: aiText // Optionally return the aiText for client-side debugging/confirmation
+      });
+  
+    } catch (err) {
+      console.error("❌ Error in /api/save:", err);
+      res.status(500).json({ 
+        error: "Internal Server Error", 
+        details: err.message 
+      });
+    }
+  });
 
 // Existing endpoint: Generate images for existing creatives
 app.post('/api/generate-images', async (req, res) => {
