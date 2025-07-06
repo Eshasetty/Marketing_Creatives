@@ -186,30 +186,82 @@ In the Background Description:
 Follow this format exactly:
 
 APPROACH:
-Title: [headline]
-Subtitle: [subheadline]
-CTA Button: [text]
-CTA URL: [url]
-CTA Style: [primary / secondary / ghost]
-CTA BG Color: [hex]
-CTA Text Color: [hex]
-Background Color: [hex]
-Background Type: [photo / solid / gradient / textured]
-Background Description: [detailed visual description]
-Brand Logo Alt Text: [alt text]
-Layout: [free / 2-col / 3-col / golden-ratio]
-Placement: [homepage / email / app / social]
-Format: [static / gif / video / html5]
-Dimensions: [width]x[height]
-Font Family: [font name]
-Font Weight: [number]
-Text Color: [hex]
-Text Alignment: [left / center / right]
-Case Style: [sentence / upper / title]
-Decorative Element Shape: [line / blob / sticker]
-Decorative Element Color: [hex]
-Legal Disclaimer: 
-Slogan: 
+Title:
+
+text: [main headline]
+
+font: [font family]
+
+weight: [font weight]
+color: [hex]
+
+alignment: [left / center / right]
+
+case: [sentence / upper / title]
+
+Subtitle 1:
+
+text: [subheadline]
+
+font: [font family]
+
+weight: [font weight]
+
+color: [hex]
+
+alignment: [left / center / right]
+
+case: [sentence / upper / title]
+
+Slogan:
+
+text: Clothes made for capturing moments, creating memories and being unapologetically you.
+
+Legal Disclaimer:
+
+text: [optional legal text]
+
+CTA:
+
+text: [CTA button text]
+
+url: [CTA target URL]
+
+style: [primary / secondary / ghost]
+
+bg_color: [hex]
+
+text_color: [hex]
+
+Background:
+
+type: [photo / solid / gradient / textured]
+
+color: [hex]
+
+description: [detailed visual description]
+
+Branding:
+
+logo_alt_text: Hollister
+
+Layout:
+
+type: [free / 2-col / 3-col / golden-ratio]
+
+placement: [homepage / email / app / social]
+
+format: [static / gif / video / html5]
+
+dimensions: [width]x[height]
+
+Decorative Element:
+
+shape: [line / blob / sticker]
+
+color: [hex]
+
+
 
 Only return the approach. No extra explanation.
           `.trim()
@@ -431,34 +483,87 @@ app.post('/api/modify', async (req, res) => {
 You are a creative assistant for ad design. You will receive an existing creative approach and modification requests.
 
 Apply the requested modifications to the existing approach while keeping the same format. Only change the fields that are mentioned in the modifications.
-
-Return the modified approach using the exact same format as the original:
+if a feild a new element is requested, add it to the end with the same format and subcategories.
+Return the modified approach using the exact same format as the original with the changes applied.:
 
 APPROACH:
-Title: [headline]
-Subtitle: [subheadline]
-CTA Button: [text]
-CTA URL: [url]
-CTA Style: [primary / secondary / ghost]
-CTA BG Color: [hex]
-CTA Text Color: [hex]
-Background Color: [hex]
-Background Type: [photo / solid / gradient / textured]
-Background Description: [detailed visual description]
-Brand Logo Alt Text: [alt text]
-Layout: [free / 2-col / 3-col / golden-ratio]
-Placement: [homepage / email / app / social]
-Format: [static / gif / video / html5]
-Dimensions: [width]x[height]
-Font Family: [font name]
-Font Weight: [number]
-Text Color: [hex]
-Text Alignment: [left / center / right]
-Case Style: [sentence / upper / title]
-Decorative Element Shape: [line / blob / sticker]
-Decorative Element Color: [hex]
-Legal Disclaimer: 
-Slogan: 
+Title:
+
+text: [main headline]
+
+font: [font family]
+
+weight: [font weight]
+
+color: [hex]
+
+alignment: [left / center / right]
+
+case: [sentence / upper / title]
+
+Subtitle 1:
+
+text: [subheadline]
+
+font: [font family]
+
+weight: [font weight]
+
+color: [hex]
+
+alignment: [left / center / right]
+
+case: [sentence / upper / title]
+
+Slogan:
+
+text: Clothes made for capturing moments, creating memories and being unapologetically you.
+
+Legal Disclaimer:
+
+text: [optional legal text]
+
+CTA:
+
+text: [CTA button text]
+
+url: [CTA target URL]
+
+style: [primary / secondary / ghost]
+
+bg_color: [hex]
+
+text_color: [hex]
+
+Background:
+
+type: [photo / solid / gradient / textured]
+
+color: [hex]
+
+description: [detailed visual description]
+
+Branding:
+
+logo_alt_text: Hollister
+
+Layout:
+
+type: [free / 2-col / 3-col / golden-ratio]
+
+placement: [homepage / email / app / social]
+
+format: [static / gif / video / html5]
+
+dimensions: [width]x[height]
+
+Decorative Element:
+
+shape: [line / blob / sticker]
+
+color: [hex]
+
+
 
 Only return the modified approach. No extra explanation.
           `.trim()
