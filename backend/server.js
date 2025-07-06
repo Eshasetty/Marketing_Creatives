@@ -81,7 +81,7 @@ async function getInspirationCreatives(description, selectedCreativeIds = []) {
         if (selectedCreativeIds.length > 0) {
             console.log(`🎯 Attempting to retrieve user-selected creatives for RAG: [${selectedCreativeIds.join(', ')}]`);
             const { data, error } = await supabase
-                .from("creatives_duplicate") // Your creatives table
+                .from("creatives") // Your creatives table
                 .select("*") // Select all details for RAG context building
                 .in("creative_id", selectedCreativeIds);
 
@@ -143,7 +143,7 @@ async function getInspirationCreatives(description, selectedCreativeIds = []) {
         const campaignIds = similarities.map(c => c.campaign_id);
   
         const { data: creatives, error: creativesError } = await supabase
-            .from("creatives_duplicate") // Your creatives table
+            .from("creatives") // Your creatives table
             .select("*") // Select all details for RAG context
             .in("campaign_id", campaignIds);
   
@@ -503,7 +503,7 @@ app.get('/api/creatives', async (req, res) => {
   try {
     console.log("➡️ Request to fetch all creatives for display.");
     const { data, error } = await supabase
-      .from("creatives_duplicate") // Or your main creatives table
+      .from("creatives") // Or your main creatives table
       .select("creative_id, campaign_id, text_blocks, background, imagery, slogan"); // Select necessary fields for display
 
     if (error) {
