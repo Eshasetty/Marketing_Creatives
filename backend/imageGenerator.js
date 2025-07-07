@@ -41,7 +41,7 @@ function parseStructuredField(lines, sectionName, fieldName) {
 * @param {string} aiText - The structured AI text from the LLM
 * @returns {string} Enhanced image prompt for Flux
 */
-function generateImagesForCreatives(aiText) {
+function createEnhancedImagePrompt(aiText) {
   try {
       console.log("🔍 Parsing structured AI text for image prompt creation...");
       
@@ -202,3 +202,10 @@ async function generateImagesForCreatives(creatives) {
 
   return results;
 }
+
+module.exports = {
+  generateImagesForCreatives,
+  createEnhancedImagePrompt,
+  parseStructuredField
+};
+
