@@ -678,7 +678,7 @@ app.post('/api/save', async (req, res) => {
         message: "Campaign and creative saved successfully.",
         campaign_id: saveResult.campaign_id,
         creative: saveResult.creative, // The full creative object saved in DB
-        image_generation_status: imageResults.length > 0 ? imageResults[0].success : (generateImages ? false : null), // null if skipped
+        image_generation_status: imageResults.length > 0 ? imageResults[1].success : (generateImages ? false : null), // null if skipped
         image_results: imageResults,
         aiText: aiText // Optionally return the aiText for client-side confirmation
       });
