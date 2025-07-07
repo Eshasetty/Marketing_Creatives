@@ -337,162 +337,68 @@ Only return the "APPROACH:" block and its content. No preambles, no explanations
  * @param {string} aiText - The raw AI-generated creative approach text.
  * @returns {Promise<Object>} An object containing the campaign_id and the saved creative object.
  */
+/**
+ * Updated function to save campaign and creatives using the new structured parser
+ */
 async function saveCampaignPromptAndCreatives(prompt, aiText) {
     try {
-      // Step 1: Embed the original campaign prompt for future similarity searches
-      console.log("Embedding campaign prompt for storage...");
-      const embeddingRes = await openai.embeddings.create({
-        model: "text-embedding-3-small",
-        input: prompt,
-      });
-      const embedding = embeddingRes.data[0].embedding;
-      console.log("Prompt embedded successfully.");
-  
-      // Step 2: Save the campaign prompt and its embedding to the campaigns table
-      const { data: campaignInsert, error: campaignError } = await supabase
-        .from("campaigns_duplicate") // Your campaigns table
-        .insert([{ campaign_prompt: prompt, embedding }])
-        .select(); // Use select() to return the inserted data
-  
-      if (campaignError) {
-        console.error("❌ Supabase Campaign Insert Error:", campaignError);
-        throw campaignError;
-      }
-      
-      const campaign_id = campaignInsert[0].campaign_id;
-      console.log(`✅ Campaign saved with ID: ${campaign_id}`);
-  
-      // Step 3: Parse AI output into a structured creative object
-      console.log("Parsing AI-generated creative text...");
-      const approachText = aiText.replace(/^APPROACH:?\s*/i, '').trim();
-      const lines = approachText.split("\n").map(l => l.trim()).filter(Boolean);
-  
-      // Helper to safely parse a field from the AI text
-      const parseField = (lines, label) => {
-        const line = lines.find(l => l.toLowerCase().startsWith(label.toLowerCase() + ":"));
-        return line ? line.split(":").slice(1).join(":").trim() : null;
-      };
-      
-      // Parse Dimensions safely
-      const dimensionsStr = parseField(lines, "Dimensions");
-      const widthHeight = dimensionsStr?.split("x").map(x => parseInt(x.trim()));
-      const dimensions = (widthHeight?.length === 2 && !isNaN(widthHeight[0]) && !isNaN(widthHeight[1]))
-        ? { width: widthHeight[0], height: widthHeight[1] }
-        : { width: 1080, height: 1920 }; // Default if parsing fails
+        // Step 1: Embed the original campaign prompt
+        console.log("Embedding campaign prompt for storage...");
+        const embeddingRes = await openai.embeddings.create({
+            model: "text-embedding-3-small",
+            input: prompt,
+        });
+        const embedding = embeddingRes.data[0].embedding;
+        console.log("Prompt embedded successfully.");
 
-      // Parse Font Weight safely
-      const fontWeightStr = parseField(lines, "Font Weight");
-      const fontWeight = parseInt(fontWeightStr);
-      const safeFontWeight = !isNaN(fontWeight) ? fontWeight : 400; // Default to 400
+        // Step 2: Save the campaign prompt and its embedding
+        const { data: campaignInsert, error: campaignError } = await supabase
+            .from("campaigns_duplicate")
+            .insert([{ campaign_prompt: prompt, embedding }])
+            .select();
 
-      // Validate layout_grid against schema constraints
-      const rawLayout = parseField(lines, "Layout")?.toLowerCase() || "free";
-      const validLayouts = ["free", "2-col", "3-col", "golden-ratio"];
-      const layout_grid = validLayouts.includes(rawLayout) ? rawLayout : "free";
-
-      // Validate format against schema constraints  
-      const rawFormat = parseField(lines, "Format")?.toLowerCase() || "static";
-      const validFormats = ["static", "gif", "video", "html5"];
-      const format = validFormats.includes(rawFormat) ? rawFormat : "static";
-
-      // Parse background type and description
-      const backgroundType = parseField(lines, "Background Type")?.toLowerCase() || "solid";
-      const validBackgroundTypes = ["photo", "solid", "gradient", "textured"];
-      const backgroundFinalType = validBackgroundTypes.includes(backgroundType) ? backgroundType : "solid";
-
-      // Construct text blocks
-      const textBlocks = [
-        {
-          type: "headline",
-          text: parseField(lines, "Title") || "",
-          font_family: parseField(lines, "Font") || "Inter",
-          font_weight: safeFontWeight,
-          color: parseField(lines, "Color") || "#000000",
-          alignment: parseField(lines, "Alignment") || "center",
-          case_style: parseField(lines, "Case") || "sentence"
-        },
-        {
-          type: "subhead",
-          text: parseField(lines, "Subtitle 1") || "", // Assuming Subtitle 1 is the primary sub
-          font_family: parseField(lines, "Font") || "Inter",
-          font_weight: safeFontWeight,
-          color: parseField(lines, "Color") || "#000000",
-          alignment: parseField(lines, "Alignment") || "center",
-          case_style: parseField(lines, "Case") || "sentence"
+        if (campaignError) {
+            console.error("❌ Supabase Campaign Insert Error:", campaignError);
+            throw campaignError;
         }
-        // You can add more text blocks if your AI output supports them
-      ];
 
-      // Construct CTA buttons
-      const ctaButtons = [{
-          text: parseField(lines, "CTA Text") || "Shop Now",
-          url: parseField(lines, "CTA URL") || "https://example.com",
-          style: parseField(lines, "CTA Style")?.toLowerCase() || "primary",
-          bg_color: parseField(lines, "CTA BG Color") || "#007bff",
-          text_color: parseField(lines, "CTA Text Color") || "#ffffff"
-      }];
+        const campaign_id = campaignInsert[0].campaign_id;
+        console.log(`✅ Campaign saved with ID: ${campaign_id}`);
 
-      // Construct decorative elements
-      const decorativeElementShape = parseField(lines, "Decorative Element Shape")?.toLowerCase() || "none";
-      const validDecorativeShapes = ["line", "blob", "sticker", "none"];
-      const decorativeElements = [{
-        shape_type: validDecorativeShapes.includes(decorativeElementShape) ? decorativeElementShape : "none",
-        color: parseField(lines, "Decorative Element Color") || "#cccccc"
-      }];
-
-
-      const creative = {
-        campaign_id,
-        placement: parseField(lines, "Placement") || "social",
-        dimensions,
-        format,
-        background: {
-          color: parseField(lines, "Background Color") || "#ffffff",
-          type: backgroundFinalType,
-          description: parseField(lines, "Background Description") || ""
-        },
-        layout_grid,
-        bleed_safe_margins: null, // To be populated later or if AI provides
-        imagery: null, // Will be populated after image generation
-        text_blocks: textBlocks,
-        cta_buttons: ctaButtons,
-        brand_logo: {
-          text_alt: parseField(lines, "Brand Logo Alt Text") || "Brand Logo"
-        },
-        brand_colors: [], // AI doesn't output this yet, can be derived or added later
-        slogan: parseField(lines, "Slogan") || null,
-        legal_disclaimer: parseField(lines, "Legal Disclaimer") || null,
-        decorative_elements: decorativeElements
-      };
-
-      // Clean undefined values by converting to null, as Supabase doesn't like undefined
-      const cleanedCreative = JSON.parse(JSON.stringify(creative, (key, value) =>
-        value === undefined ? null : value
-      ));
-
-      console.log(`🔍 Attempting to save parsed creative data to Supabase:`);
-      // console.log(JSON.stringify(cleanedCreative, null, 2)); // Uncomment for detailed debug
-
-      const { data, error } = await supabase
-        .from("creatives_duplicate") // Your creatives table
-        .insert([cleanedCreative])
-        .select(); // Use select() to return the inserted data
+        // Step 3: Parse AI output using the new structured parser
+        console.log("Parsing AI-generated creative text...");
+        const creative = parseStructuredAIText(aiText);
         
-      if (error) {
-        console.error(`❌ Supabase Creative Insert Error:`, error);
-        console.error("❌ Supabase Error details:", JSON.stringify(error, null, 2));
-        throw error;
-      } else {
-        console.log(`✅ Creative saved successfully with ID: ${data[0].creative_id}`);
-        return {
-          campaign_id,
-          creative: data[0] // Return the fully saved creative object from DB
-        };
-      }
+        // Add campaign_id to the creative object
+        creative.campaign_id = campaign_id;
+
+        // Clean undefined values
+        const cleanedCreative = JSON.parse(JSON.stringify(creative, (key, value) =>
+            value === undefined ? null : value
+        ));
+
+        console.log(`🔍 Attempting to save parsed creative data to Supabase:`);
+        
+        const { data, error } = await supabase
+            .from("creatives_duplicate")
+            .insert([cleanedCreative])
+            .select();
+
+        if (error) {
+            console.error(`❌ Supabase Creative Insert Error:`, error);
+            console.error("❌ Supabase Error details:", JSON.stringify(error, null, 2));
+            throw error;
+        } else {
+            console.log(`✅ Creative saved successfully with ID: ${data[0].creative_id}`);
+            return {
+                campaign_id,
+                creative: data[0]
+            };
+        }
 
     } catch (err) {
-      console.error("❌ Failed to save campaign and creative to database:", err);
-      throw err; // Re-throw to be caught by the API endpoint
+        console.error("❌ Failed to save campaign and creative to database:", err);
+        throw err;
     }
 }
 
@@ -503,7 +409,7 @@ app.get('/api/creatives', async (req, res) => {
   try {
     console.log("➡️ Request to fetch all creatives for display.");
     const { data, error } = await supabase
-      .from("creatives") // Or your main creatives table
+      .from("creatives_duplicate") // Or your main creatives table
       .select("creative_id, campaign_id, text_blocks, background, imagery, slogan"); // Select necessary fields for display
 
     if (error) {
@@ -785,7 +691,126 @@ app.post('/api/save', async (req, res) => {
       });
     }
 });
+/**
+ * Improved parsing function to handle the structured AI text format
+ * @param {string} aiText - The AI generated text in structured format
+ * @returns {Object} Parsed creative object
+ */
+function parseStructuredAIText(aiText) {
+    const approachText = aiText.replace(/^APPROACH:?\s*/i, '').trim();
+    const lines = approachText.split("\n").map(l => l.trim()).filter(Boolean);
+    
+    // Enhanced helper to parse structured fields
+    const parseStructuredField = (lines, sectionName, fieldName) => {
+        const sectionIndex = lines.findIndex(l => l.toLowerCase().includes(sectionName.toLowerCase() + ":"));
+        if (sectionIndex === -1) return null;
+        
+        // Look for the field within the next few lines after the section
+        for (let i = sectionIndex + 1; i < Math.min(sectionIndex + 10, lines.length); i++) {
+            const line = lines[i].toLowerCase();
+            if (line.startsWith(fieldName.toLowerCase() + ":")) {
+                return lines[i].split(":").slice(1).join(":").trim();
+            }
+            // Stop if we hit another section
+            if (line.includes(":") && !line.startsWith(fieldName.toLowerCase())) {
+                const nextSection = ["title:", "subtitle", "slogan:", "legal disclaimer:", "cta:", "background:", "branding:", "layout:", "decorative element:"];
+                if (nextSection.some(section => line.includes(section))) {
+                    break;
+                }
+            }
+        }
+        return null;
+    };
+    
+    // Parse dimensions safely
+    const dimensionsStr = parseStructuredField(lines, "Layout", "dimensions");
+    const widthHeight = dimensionsStr?.split("x").map(x => parseInt(x.trim()));
+    const dimensions = (widthHeight?.length === 2 && !isNaN(widthHeight[0]) && !isNaN(widthHeight[1]))
+        ? { width: widthHeight[0], height: widthHeight[1] }
+        : { width: 1080, height: 1920 };
 
+    // Parse font weight safely
+    const fontWeightStr = parseStructuredField(lines, "Title", "weight");
+    const fontWeight = parseInt(fontWeightStr);
+    const safeFontWeight = !isNaN(fontWeight) ? fontWeight : 400;
+
+    // Validate layout_grid
+    const rawLayout = parseStructuredField(lines, "Layout", "type")?.toLowerCase() || "free";
+    const validLayouts = ["free", "2-col", "3-col", "golden-ratio"];
+    const layout_grid = validLayouts.includes(rawLayout) ? rawLayout : "free";
+
+    // Validate format
+    const rawFormat = parseStructuredField(lines, "Layout", "format")?.toLowerCase() || "static";
+    const validFormats = ["static", "gif", "video", "html5"];
+    const format = validFormats.includes(rawFormat) ? rawFormat : "static";
+
+    // Parse background
+    const backgroundType = parseStructuredField(lines, "Background", "type")?.toLowerCase() || "solid";
+    const validBackgroundTypes = ["photo", "solid", "gradient", "textured"];
+    const backgroundFinalType = validBackgroundTypes.includes(backgroundType) ? backgroundType : "solid";
+
+    // Construct text blocks
+    const textBlocks = [
+        {
+            type: "headline",
+            text: parseStructuredField(lines, "Title", "text") || "",
+            font_family: parseStructuredField(lines, "Title", "font") || "Inter",
+            font_weight: safeFontWeight,
+            color: parseStructuredField(lines, "Title", "color") || "#000000",
+            alignment: parseStructuredField(lines, "Title", "alignment") || "center",
+            case_style: parseStructuredField(lines, "Title", "case") || "sentence"
+        },
+        {
+            type: "subhead",
+            text: parseStructuredField(lines, "Subtitle 1", "text") || "",
+            font_family: parseStructuredField(lines, "Subtitle 1", "font") || "Inter",
+            font_weight: parseInt(parseStructuredField(lines, "Subtitle 1", "weight")) || 400,
+            color: parseStructuredField(lines, "Subtitle 1", "color") || "#000000",
+            alignment: parseStructuredField(lines, "Subtitle 1", "alignment") || "center",
+            case_style: parseStructuredField(lines, "Subtitle 1", "case") || "sentence"
+        }
+    ];
+
+    // Construct CTA buttons
+    const ctaButtons = [{
+        text: parseStructuredField(lines, "CTA", "text") || "Shop Now",
+        url: parseStructuredField(lines, "CTA", "url") || "https://example.com",
+        style: parseStructuredField(lines, "CTA", "style")?.toLowerCase() || "primary",
+        bg_color: parseStructuredField(lines, "CTA", "bg_color") || "#007bff",
+        text_color: parseStructuredField(lines, "CTA", "text_color") || "#ffffff"
+    }];
+
+    // Construct decorative elements
+    const decorativeElementShape = parseStructuredField(lines, "Decorative Element", "shape")?.toLowerCase() || "none";
+    const validDecorativeShapes = ["line", "blob", "sticker", "none"];
+    const decorativeElements = [{
+        shape_type: validDecorativeShapes.includes(decorativeElementShape) ? decorativeElementShape : "none",
+        color: parseStructuredField(lines, "Decorative Element", "color") || "#cccccc"
+    }];
+
+    return {
+        placement: parseStructuredField(lines, "Layout", "placement") || "social",
+        dimensions,
+        format,
+        background: {
+            color: parseStructuredField(lines, "Background", "color") || "#ffffff",
+            type: backgroundFinalType,
+            description: parseStructuredField(lines, "Background", "description") || ""
+        },
+        layout_grid,
+        bleed_safe_margins: null,
+        imagery: null,
+        text_blocks: textBlocks,
+        cta_buttons: ctaButtons,
+        brand_logo: {
+            text_alt: parseStructuredField(lines, "Branding", "logo_alt_text") || "Brand Logo"
+        },
+        brand_colors: [],
+        slogan: parseStructuredField(lines, "Slogan", "text") || null,
+        legal_disclaimer: parseStructuredField(lines, "Legal Disclaimer", "text") || null,
+        decorative_elements: decorativeElements
+    };
+}
 // Existing endpoint: Generate images for already existing creatives (e.g., historical ones)
 app.post('/api/generate-images', async (req, res) => {
   const { campaign_id } = req.body; // Expect a campaign_id to generate images for its creatives
