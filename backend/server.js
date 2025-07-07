@@ -632,14 +632,14 @@ Only return the "APPROACH:" block and its content. No preambles, no explanations
 // NEW ENDPOINT: Save the finalized approach and potentially generate images
 app.post('/api/save', async (req, res) => {
     const { campaignPrompt, aiText, generateImages = true } = req.body;
-    
+  
     if (!campaignPrompt || !aiText) {
       return res.status(400).json({ error: "campaignPrompt and aiText are required to save." });
     }
   
     try {
       console.log("➡️ Request to save finalized creative approach.");
-      
+  
       // Step 1: Save campaign and creative data to the database
       const saveResult = await saveCampaignPromptAndCreatives(campaignPrompt, aiText);
       console.log("✅ Creative data saved to database. Ready for image generation.");
@@ -649,48 +649,68 @@ app.post('/api/save', async (req, res) => {
       if (generateImages && process.env.REPLICATE_API_TOKEN && saveResult.creative) {
         console.log("🎨 Initiating image generation for the saved creative...");
         try {
-          // generateImagesForCreatives expects an array of objects,
-          // each with 'creative_id' and 'aiText' (or the full creative object)
-          // Adjust 'imageGenerator.js' if it expects only parsed creative JSON.
           const creativeForImageGen = {
-            creative_id: saveResult.creative.creative_id, 
-            aiText: aiText // Pass the original AI text for prompt generation
+            creative_id: saveResult.creative.creative_id,
+            aiText: aiText
           };
-          
+  
           imageResults = await generateImagesForCreatives([creativeForImageGen]);
           console.log(`✅ Image generation completed: ${imageResults.length} results.`);
   
         } catch (imageError) {
           console.error("❌ Image generation failed for saved creative:", imageError.message);
-          // Continue, but indicate failure in response
-          imageResults = [{ success: false, error: `Image generation failed: ${imageError.message}`, creative_id: saveResult.creative.creative_id }];
+          imageResults = [{
+            success: false,
+            error: `Image generation failed: ${imageError.message}`,
+            creative_id: saveResult.creative.creative_id
+          }];
         }
       } else if (!generateImages) {
-          console.log("ℹ️ Image generation explicitly skipped by client request.");
+        console.log("ℹ️ Image generation explicitly skipped by client request.");
       } else if (!process.env.REPLICATE_API_TOKEN) {
-          console.warn("⚠️ REPLICATE_API_TOKEN is not configured, skipping image generation.");
+        console.warn("⚠️ REPLICATE_API_TOKEN is not configured, skipping image generation.");
       } else if (!saveResult.creative) {
-          console.warn("⚠️ No creative object returned from save operation, skipping image generation.");
+        console.warn("⚠️ No creative object returned from save operation, skipping image generation.");
+      }
+  
+      // ✅ Safely extract second imagery (poster)
+      const imagery = saveResult.creative?.imagery || [];
+      const posterImage = imagery[1];
+  
+      let posterUrl = null;
+      if (typeof posterImage === "string") {
+        posterUrl = posterImage;
+      } else if (posterImage && typeof posterImage === "object") {
+        posterUrl = posterImage.image_url || posterImage.url || posterImage.src || null;
       }
   
       console.log("✅ Save and image generation process finished.");
+  
+      // ✅ Send single clean response
       res.json({
         message: "Campaign and creative saved successfully.",
         campaign_id: saveResult.campaign_id,
-        creative: saveResult.creative, // The full creative object saved in DB
-        image_generation_status: imageResults.length > 0 ? imageResults[1].success : (generateImages ? false : null), // null if skipped
+        creative: saveResult.creative,
+        image_generation_status: !!posterUrl,
+        poster_url: posterUrl,
         image_results: imageResults,
-        aiText: aiText // Optionally return the aiText for client-side confirmation
+        aiText: aiText
       });
   
     } catch (err) {
       console.error("❌ Unhandled Error in /api/save endpoint:", err);
-      res.status(500).json({ 
-        error: "Internal Server Error during save operation", 
-        details: err.message 
+      res.status(500).json({
+        error: "Internal Server Error during save operation",
+        details: err.message
       });
     }
-});
+  });
+  
+/**
+ * Improved parsing function to handle the structured AI text format
+ * @param {string} aiText - The AI generated text in structured format
+ * @returns {Object} Parsed creative object
+ */
 /**
  * Improved parsing function to handle the structured AI text format
  * @param {string} aiText - The AI generated text in structured format
@@ -788,6 +808,22 @@ function parseStructuredAIText(aiText) {
         color: parseStructuredField(lines, "Decorative Element", "color") || "#cccccc"
     }];
 
+    // *** FIX: Initialize imagery array with placeholders for background and full poster ***
+    const imagery = [
+        {
+            type: "background",
+            url: null, // Will be populated by image generation
+            alt_text: "Generated background image",
+            status: "pending"
+        },
+        {
+            type: "full_poster",
+            url: null, // Will be populated by image generation
+            alt_text: "Generated full poster image",
+            status: "pending"
+        }
+    ];
+
     return {
         placement: parseStructuredField(lines, "Layout", "placement") || "social",
         dimensions,
@@ -799,7 +835,7 @@ function parseStructuredAIText(aiText) {
         },
         layout_grid,
         bleed_safe_margins: null,
-        imagery: null,
+        imagery: imagery, // *** CHANGED: Now properly initialized as an array ***
         text_blocks: textBlocks,
         cta_buttons: ctaButtons,
         brand_logo: {
