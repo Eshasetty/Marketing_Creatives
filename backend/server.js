@@ -640,59 +640,62 @@ app.post('/api/save', async (req, res) => {
     try {
       console.log("➡️ Request to save finalized creative approach.");
   
-      // Step 1: Save campaign and creative data to the database
+      // Step 1: Save campaign and creative to DB
       const saveResult = await saveCampaignPromptAndCreatives(campaignPrompt, aiText);
       console.log("✅ Creative data saved to database. Ready for image generation.");
   
-      // Step 2: Generate images if requested and Replicate token is available
       let imageResults = [];
+      let posterUrl = null;
+  
+      // Step 2: Generate images if enabled
       if (generateImages && process.env.REPLICATE_API_TOKEN && saveResult.creative) {
         console.log("🎨 Initiating image generation for the saved creative...");
-        try {
-          const creativeForImageGen = {
-            creative_id: saveResult.creative.creative_id,
-            aiText: aiText
-          };
   
+        const creativeForImageGen = {
+          creative_id: saveResult.creative.creative_id,
+          aiText: aiText
+        };
+  
+        try {
           imageResults = await generateImagesForCreatives([creativeForImageGen]);
           console.log(`✅ Image generation completed: ${imageResults.length} results.`);
   
+          // ✅ Extract poster URL from returned imageResults
+          const firstResult = imageResults[0];
+          if (firstResult && firstResult.savedImageryData) {
+            const posterImage = firstResult.savedImageryData.find(img => img.type === "poster" && img.url);
+            if (posterImage) {
+              posterUrl = posterImage.url;
+              console.log("✅ Poster image URL extracted:", posterUrl);
+            } else {
+              console.warn("⚠️ No poster image found in savedImageryData.");
+            }
+          }
+  
         } catch (imageError) {
-          console.error("❌ Image generation failed for saved creative:", imageError.message);
+          console.error("❌ Image generation failed:", imageError.message);
           imageResults = [{
             success: false,
             error: `Image generation failed: ${imageError.message}`,
             creative_id: saveResult.creative.creative_id
           }];
         }
+  
       } else if (!generateImages) {
-        console.log("ℹ️ Image generation explicitly skipped by client request.");
+        console.log("ℹ️ Image generation skipped by client.");
       } else if (!process.env.REPLICATE_API_TOKEN) {
-        console.warn("⚠️ REPLICATE_API_TOKEN is not configured, skipping image generation.");
+        console.warn("⚠️ Missing REPLICATE_API_TOKEN, skipping image generation.");
       } else if (!saveResult.creative) {
-        console.warn("⚠️ No creative object returned from save operation, skipping image generation.");
+        console.warn("⚠️ No creative returned from save operation.");
       }
   
-      // ✅ Safely extract second imagery (poster)
-      const imagery = saveResult.creative?.imagery || [];
-      const posterImage = imagery[1];
-  
-      let posterUrl = null;
-      if (typeof posterImage === "string") {
-        posterUrl = posterImage;
-      } else if (posterImage && typeof posterImage === "object") {
-        posterUrl = posterImage.image_url || posterImage.url || posterImage.src || null;
-      }
-  
-      console.log("✅ Save and image generation process finished.");
-  
-      // ✅ Send single clean response
+      // ✅ Final response
       res.json({
         message: "Campaign and creative saved successfully.",
         campaign_id: saveResult.campaign_id,
         creative: saveResult.creative,
-        image_generation_status: !!posterUrl,
         poster_url: posterUrl,
+        image_generation_status: !!posterUrl,
         image_results: imageResults,
         aiText: aiText
       });
@@ -705,6 +708,7 @@ app.post('/api/save', async (req, res) => {
       });
     }
   });
+  
   
 /**
  * Improved parsing function to handle the structured AI text format
