@@ -11,19 +11,9 @@ const replicate = new Replicate({
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-/**
- * Parses the raw aiText string into a structured creative object suitable for the database.
- * This is a placeholder function. YOU NEED TO IMPLEMENT ITS LOGIC.
- * It should extract all relevant fields (title, subtitle, background color, etc.)
- * from the aiText and return a structured object.
- *
- * @param {string} aiText - The raw AI generated text.
- * @returns {Object} - A structured creative object (excluding imagery initially).
- */
+
 function parseAiTextToCreativeObject(aiText) {
-  // --- IMPORTANT: YOU NEED TO IMPLEMENT THIS FUNCTION ---
-  // This is where you'd parse the 'APPROACH:' format into the creative object structure.
-  // Example (simplified):
+ 
   const creative = {
     placement: "center", // Example: derive from aiText
     dimensions: { width: 1200, height: 800 }, // Example: derive from aiText
@@ -33,8 +23,6 @@ function parseAiTextToCreativeObject(aiText) {
       type: "solid", // Example: derive from aiText
       description: extractBackgroundDescription(aiText) // Use your existing extraction
     },
-    // ... parse other fields like text_blocks, cta_buttons, brand_logo, etc.
-    // For now, I'll put a basic structure so it doesn't break, but it won't be fully populated.
     layout_grid: "free",
     bleed_safe_margins: null,
     text_blocks: [], // Populate this from aiText
@@ -46,7 +34,7 @@ function parseAiTextToCreativeObject(aiText) {
     decorative_elements: [] // Populate this from aiText
   };
 
-  // Example of parsing a few fields - expand this significantly!
+
   const titleMatch = aiText.match(/Title:\s*(.+)/);
   if (titleMatch) creative.text_blocks.push({ type: "headline", text: titleMatch[1].trim() });
   
@@ -76,12 +64,6 @@ function parseAiTextToCreativeObject(aiText) {
   return creative;
 }
 
-/**
- * Extract background description from aiText string.
- * Uses a more robust regex to handle multi-line inputs and ensure "Background Description:" is found.
- * @param {string} aiText - The AI text containing background description.
- * @returns {string|null} - The background description or null if not found.
- */
 function extractBackgroundDescription(aiText) {
   const match = aiText.match(/background description:\s*(.+)/i)
   if (match) {
@@ -93,15 +75,40 @@ function extractBackgroundDescription(aiText) {
 }
 
 /**
- * Generates an image using the Flux model and uploads it to Supabase Storage.
- * This function returns the metadata needed for the database record, but does NOT update the DB itself.
- *
- * @param {string} prompt - The image generation prompt directly provided.
- * @param {string} creativeId - The creative ID to associate with the image.
- * @param {string} bucketName - Supabase storage bucket name (default: 'creative-images').
- * @param {string} imageType - Type of image ('background' or 'poster') for filename and for the 'type' field in the DB array.
- * @returns {Promise<Object>} - Result object with image URL and metadata for later DB insertion.
+ * Extracts a concise, visually focused poster description from aiText.
+ * This is optimized for image generation (Flux) — no metadata like "CTA", "Slogan", etc.
+ * 
+ * @param {string} aiText - The full AI-generated creative text
+ * @returns {string} A clean visual prompt for generating the poster image
  */
+function extractPosterDescription(aiText) {
+  const backgroundMatch = aiText.match(/background description:\s*(.+)/i);
+  const titleMatch = aiText.match(/title:\s*(.+)/i);
+  const subtitleMatch = aiText.match(/subtitle:\s*(.+)/i);
+  const colorMatch = aiText.match(/background color:\s*(.+)/i);
+  const layoutMatch = aiText.match(/layout:\s*(.+)/i);
+  const decorativeMatch = aiText.match(/decorative elements:\s*(.+)/i);
+  const vibeMatch = aiText.match(/overall style:\s*(.+)/i); // Optional line if you include it
+
+  // Build a compact descriptive prompt
+  const parts = [];
+
+  if (backgroundMatch) parts.push(backgroundMatch[1].trim());
+  if (decorativeMatch) parts.push(decorativeMatch[1].trim());
+  if (colorMatch) parts.push(`with a background color of ${colorMatch[1].trim()}`);
+  if (layoutMatch) parts.push(`using a ${layoutMatch[1].trim()} layout`);
+  if (titleMatch || subtitleMatch) {
+    const textSummary = [
+      titleMatch?.[1]?.trim(),
+      subtitleMatch?.[1]?.trim()
+    ].filter(Boolean).join(' — ');
+    parts.push(`poster text: "${textSummary}"`);
+  }
+  if (vibeMatch) parts.push(`style: ${vibeMatch[1].trim()}`);
+
+  return parts.join(', ');
+}
+
 async function generateFluxImageToStorage(prompt, creativeId, bucketName = 'creative-images', imageType) {
   try {
     console.log(`🎨 Generating Flux ${imageType} image for creative ${creativeId} with prompt: "${prompt}"`);
@@ -222,16 +229,7 @@ async function generateFluxImageToStorage(prompt, creativeId, bucketName = 'crea
   }
 }
 
-/**
- * Generates both background and poster images for multiple creatives in parallel.
- * Updates the 'imagery' JSONB array column for each creative in the database.
- * This function is primarily for batch processing and assumes creative objects
- * already exist in the database with their respective 'aiText' (or equivalent prompt source).
- *
- * @param {Array<Object>} creatives - Array of creative objects. Each object MUST have `creative_id` and `aiText`.
- * @param {number} maxConcurrent - Maximum concurrent generations (default: 3).
- * @returns {Promise<Array>} - Array of generation results for each creative.
- */
+
 async function generateImagesForCreatives(creatives, maxConcurrent = 3) {
   console.log(`🎨 Starting batch Flux image generation for ${creatives.length} creatives (background and poster)`);
 
@@ -329,16 +327,6 @@ async function generateImagesForCreatives(creatives, maxConcurrent = 3) {
 }
 
 
-/**
- * MAIN FUNCTION FOR YOUR API - Call this from your /api/save endpoint.
- * Orchestrates the entire process: parsing aiText, saving initial creative to DB,
- * generating background/poster images, and updating the DB with image URLs.
- *
- * @param {Object} requestData - The data from your API request, expected to contain
- * `campaignPrompt`, `aiText`, and `generateImages`.
- * Optionally, `creative_id` if updating an existing creative.
- * @returns {Promise<Object>} - Result object detailing the success/failure and generated image URLs/metadata.
- */
 async function processImageGenerationRequest(requestData) {
   try {
     const { campaignPrompt, aiText, generateImages } = requestData;
@@ -384,7 +372,8 @@ async function processImageGenerationRequest(requestData) {
 
     // --- Step 3: Generate images using the original aiText prompts ---
     const backgroundPrompt = extractBackgroundDescription(aiText);
-    const posterPrompt = aiText; // Full aiText for poster
+    const posterPrompt = extractPosterDescription(aiText);
+
 
     console.log(`🔍 DEBUG: Background Prompt for ${creativeId}: "${backgroundPrompt}"`);
     console.log(`🔍 DEBUG: Poster Prompt for ${creativeId}: "${posterPrompt ? posterPrompt.substring(0, Math.min(posterPrompt.length, 500)) + '...' : 'NULL or UNDEFINED'}"`);
@@ -466,11 +455,11 @@ async function processImageGenerationRequest(requestData) {
   }
 }
 
-// Export the functions
 module.exports = {
-  generateFluxImageToStorage, // Helper function, primarily for internal use
-  generateImagesForCreatives, // For batch processing (if you use it separately)
-  processImageGenerationRequest, // <-- The new, central API entry point
-  extractBackgroundDescription, // Utility function
-  parseAiTextToCreativeObject // Placeholder for your parsing logic
+  generateFluxImageToStorage,
+  generateImagesForCreatives,
+  processImageGenerationRequest,
+  extractBackgroundDescription,
+  extractPosterDescription, 
+  parseAiTextToCreativeObject
 };
