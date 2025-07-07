@@ -83,25 +83,13 @@ function parseAiTextToCreativeObject(aiText) {
  * @returns {string|null} - The background description or null if not found.
  */
 function extractBackgroundDescription(aiText) {
-  if (!aiText || typeof aiText !== 'string') {
-    console.warn('aiText is not a valid string');
-    return null;
+  const match = aiText.match(/background description:\s*(.+)/i)
+  if (match) {
+    return match[1].trim()
   }
 
-  // Regex to find "Background Description:" allowing for any characters (including newlines) before it,
-  // and capturing the description until a newline or end of string.
-  // The 'm' flag makes '^' and '$' match start/end of lines, not just start/end of string.
-  const backgroundDescriptionRegex = /^.*Background Description:\s*(.+?)(?=\n|$)/im;
-  const match = aiText.match(backgroundDescriptionRegex);
-  
-  if (match && match[1]) {
-    const description = match[1].trim();
-    console.log(`✅ Extracted background description: "${description}"`);
-    return description;
-  }
-
-  console.warn('No background description found in aiText using current regex pattern.');
-  return null;
+  console.warn("❌ Failed to extract background from aiText:", aiText)
+  return "simple white background with no text or graphics" // fallback
 }
 
 /**
