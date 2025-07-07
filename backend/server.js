@@ -409,7 +409,7 @@ app.get('/api/creatives', async (req, res) => {
   try {
     console.log("➡️ Request to fetch all creatives for display.");
     const { data, error } = await supabase
-      .from("creatives_duplicate") // Or your main creatives table
+      .from("creatives") // Or your main creatives table
       .select("creative_id, campaign_id, text_blocks, background, imagery, slogan"); // Select necessary fields for display
 
     if (error) {
