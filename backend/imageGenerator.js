@@ -1,4 +1,14 @@
 // imageGenerator.js - Updated to handle structured AI text format
+const Replicate = require("replicate");
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN
+});
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY // Use service role key for updates
+);
 
 /**
  * Enhanced helper to parse structured fields from AI text
@@ -117,141 +127,78 @@ function createEnhancedImagePrompt(aiText) {
 */
 async function generateImagesForCreatives(creatives) {
   const results = [];
-  
+
   if (!process.env.REPLICATE_API_TOKEN) {
-      console.error("❌ REPLICATE_API_TOKEN is not configured");
-      return creatives.map(c => ({
-          success: false,
-          creative_id: c.creative_id,
-          error: "REPLICATE_API_TOKEN not configured"
-      }));
+    console.error("❌ REPLICATE_API_TOKEN is not configured");
+    return creatives.map(c => ({
+      success: false,
+      creative_id: c.creative_id,
+      error: "REPLICATE_API_TOKEN not configured"
+    }));
   }
-  
+
   console.log(`🎨 Starting image generation for ${creatives.length} creatives...`);
-  
+
   for (const creative of creatives) {
-      try {
-          console.log(`\n🖼️ Processing creative ${creative.creative_id}...`);
-          
-          // Create enhanced prompt from the structured AI text
-          const enhancedPrompt = createEnhancedImagePrompt(creative.aiText);
-          
-          // Generate image using Replicate Flux model
-          const response = await fetch("https://api.replicate.com/v1/predictions", {
-              method: "POST",
-              headers: {
-                  "Authorization": `Token ${process.env.REPLICATE_API_TOKEN}`,
-                  "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                  version: "black-forest-labs/flux-schnell:bf2f4114adde4da83aa1ad4b4b8e49b6e38cd3a2d0e9a5b4bf6c3c6d4a8a3c2a", // Use the actual Flux model version
-                  input: {
-                      prompt: enhancedPrompt,
-                      width: 1024,
-                      height: 1024,
-                      num_inference_steps: 4,
-                      guidance_scale: 0,
-                      num_outputs: 1
-                  }
-              })
-          });
-          
-          if (!response.ok) {
-              const errorData = await response.text();
-              console.error(`❌ Replicate API Error for creative ${creative.creative_id}:`, errorData);
-              results.push({
-                  success: false,
-                  creative_id: creative.creative_id,
-                  error: `Replicate API Error: ${response.status} ${response.statusText}`
-              });
-              continue;
-          }
-          
-          const prediction = await response.json();
-          console.log(`⏳ Prediction started for creative ${creative.creative_id}. ID: ${prediction.id}`);
-          
-          // Poll for completion
-          let finalPrediction = prediction;
-          const maxAttempts = 60; // 5 minutes max
-          let attempts = 0;
-          
-          while (finalPrediction.status !== "succeeded" && finalPrediction.status !== "failed" && attempts < maxAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-              attempts++;
-              
-              const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
-                  headers: {
-                      "Authorization": `Token ${process.env.REPLICATE_API_TOKEN}`,
-                  }
-              });
-              
-              if (pollResponse.ok) {
-                  finalPrediction = await pollResponse.json();
-                  console.log(`⏳ Attempt ${attempts}: Status is ${finalPrediction.status} for creative ${creative.creative_id}`);
-              } else {
-                  console.error(`❌ Error polling prediction ${prediction.id}:`, pollResponse.status);
-                  break;
-              }
-          }
-          
-          if (finalPrediction.status === "succeeded" && finalPrediction.output) {
-              const imageUrl = Array.isArray(finalPrediction.output) ? finalPrediction.output[0] : finalPrediction.output;
-              console.log(`✅ Image generated successfully for creative ${creative.creative_id}: ${imageUrl}`);
-              
-              // Update the creative in the database with the image URL
-              const { error: updateError } = await supabase
-                  .from("creatives_duplicate")
-                  .update({
-                      imagery: [{ url: imageUrl, type: "generated", alt_text: "Generated background image" }]
-                  })
-                  .eq("creative_id", creative.creative_id);
-              
-              if (updateError) {
-                  console.error(`❌ Database update error for creative ${creative.creative_id}:`, updateError);
-                  results.push({
-                      success: false,
-                      creative_id: creative.creative_id,
-                      error: `Database update failed: ${updateError.message}`,
-                      image_url: imageUrl
-                  });
-              } else {
-                  console.log(`✅ Database updated successfully for creative ${creative.creative_id}`);
-                  results.push({
-                      success: true,
-                      creative_id: creative.creative_id,
-                      image_url: imageUrl,
-                      prediction_id: prediction.id
-                  });
-              }
-          } else {
-              console.error(`❌ Image generation failed for creative ${creative.creative_id}:`, finalPrediction.error || "Unknown error");
-              results.push({
-                  success: false,
-                  creative_id: creative.creative_id,
-                  error: finalPrediction.error || `Generation failed with status: ${finalPrediction.status}`
-              });
-          }
-          
-      } catch (error) {
-          console.error(`❌ Critical Error (Batch): '${error.message}' for creative ${creative.creative_id}.`);
-          results.push({
-              success: false,
-              creative_id: creative.creative_id,
-              error: error.message
-          });
+    try {
+      console.log(`\n🖼️ Processing creative ${creative.creative_id}...`);
+
+      const enhancedPrompt = createEnhancedImagePrompt(creative.aiText);
+
+      // ✅ Use Replicate SDK (no polling)
+      const output = await replicate.run("black-forest-labs/flux-schnell", {
+        input: {
+          prompt: enhancedPrompt,
+          width: 1024,
+          height: 1024,
+          num_inference_steps: 4,
+          guidance_scale: 0,
+          num_outputs: 1
+        }
+      });
+
+      const imageUrl = Array.isArray(output) ? output[0] : output;
+
+      console.log(`✅ Image generated successfully for creative ${creative.creative_id}: ${imageUrl}`);
+
+      // ✅ Update Supabase with the image URL
+      const { error: updateError } = await supabase
+        .from("creatives_duplicate")
+        .update({
+          imagery: [{ url: imageUrl, type: "generated", alt_text: "Generated background image" }]
+        })
+        .eq("creative_id", creative.creative_id);
+
+      if (updateError) {
+        console.error(`❌ Database update error:`, updateError);
+        results.push({
+          success: false,
+          creative_id: creative.creative_id,
+          error: `Database update failed: ${updateError.message}`,
+          image_url: imageUrl
+        });
+      } else {
+        console.log(`✅ Database updated successfully for creative ${creative.creative_id}`);
+        results.push({
+          success: true,
+          creative_id: creative.creative_id,
+          image_url: imageUrl
+        });
       }
+
+    } catch (error) {
+      console.error(`❌ Critical Error for creative ${creative.creative_id}:`, error.message);
+      results.push({
+        success: false,
+        creative_id: creative.creative_id,
+        error: error.message
+      });
+    }
   }
-  
+
   const successful = results.filter(r => r.success).length;
   const failed = results.filter(r => !r.success).length;
-  console.log(`\n✅ Flux image generation and database updates complete for all creatives: ${successful} successful, ${failed} failed`);
-  
+  console.log(`\n✅ Flux image generation complete: ${successful} succeeded, ${failed} failed`);
+
   return results;
 }
-
-// Export the functions
-module.exports = {
-  generateImagesForCreatives,
-  createEnhancedImagePrompt,
-  parseStructuredField  // Export this helper function too
-};
