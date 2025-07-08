@@ -234,80 +234,49 @@ For 'Decorative Element', consider simple shapes like: [line / blob / sticker / 
 
 Output the creative approach using this EXACT format:
 
-APPROACH:
-Title:
-
+Title
 text: [main headline]
-
 font: [font family]
-
 weight: [font weight]
 color: [hex]
-
 alignment: [left / center / right]
-
 case: [sentence / upper / title]
 
-Subtitle 1:
-
+Subtitle 1
 text: [subheadline]
-
 font: [font family]
-
 weight: [font weight]
-
 color: [hex]
-
 alignment: [left / center / right]
-
 case: [sentence / upper / title]
 
-Slogan:
-
+Slogan
 text: [brand slogan or tag line]
-
 Legal Disclaimer:
-
 text: [optional legal text, if applicable]
 
-CTA:
-
+CTA
 text: [CTA button text, e.g., Shop Now, Learn More]
-
 url: [CTA target URL, e.g., https://example.com/shop]
-
 style: [primary / secondary / ghost]
-
 bg_color: [hex]
-
 text_color: [hex]
 
-Background:
-
+Background
 type: [photo / solid / gradient / textured]
-
 color: [hex]
-
 description: [detailed visual description of the background]
-
 Branding:
-
 logo_alt_text: Hollister [or other brand]
 
-Layout:
-
+Layout
 type: [free / 2-col / 3-col / golden-ratio]
-
 placement: [homepage / email / app / social / display]
-
 format: [static / gif / video / html5]
-
 dimensions: [width]x[height]
 
-Decorative Element:
-
+Decorative Element
 shape: [line / blob / sticker / none]
-
 color: [hex]
 
 Only return the "APPROACH:" block and its content. No preambles, no explanations, no extra dialogue.
@@ -518,81 +487,50 @@ Ensure all fields from the original format are still present in your modified ou
 
 Always return the modified approach using this EXACT format:
 
-APPROACH:
-Title:
 
+Title
 text: [main headline]
-
 font: [font family]
-
 weight: [font weight]
-
 color: [hex]
-
 alignment: [left / center / right]
-
 case: [sentence / upper / title]
 
-Subtitle 1:
-
+Subtitle 1
 text: [subheadline]
-
 font: [font family]
-
 weight: [font weight]
-
 color: [hex]
-
 alignment: [left / center / right]
-
 case: [sentence / upper / title]
 
-Slogan:
-
+Slogan
 text: [brand slogan or tag line]
-
 Legal Disclaimer:
-
 text: [optional legal text, if applicable]
 
-CTA:
-
+CTA
 text: [CTA button text, e.g., Shop Now, Learn More]
-
 url: [CTA target URL, e.g., https://example.com/shop]
-
 style: [primary / secondary / ghost]
-
 bg_color: [hex]
-
 text_color: [hex]
 
-Background:
-
+Background
 type: [photo / solid / gradient / textured]
-
 color: [hex]
-
 description: [detailed visual description of the background]
-
 Branding:
-
 logo_alt_text: Hollister [or other brand]
 
-Layout:
-
+Layout
 type: [free / 2-col / 3-col / golden-ratio]
-
 placement: [homepage / email / app / social / display]
-
 format: [static / gif / video / html5]
-
 dimensions: [width]x[height]
 
-Decorative Element:
-
+Decorative Element
 shape: [line / blob / sticker / none]
-
 color: [hex]
 
 Only return the "APPROACH:" block and its content. No preambles, no explanations, no extra dialogue.
