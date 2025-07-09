@@ -71,7 +71,6 @@ function extractBackgroundDescription(aiText) {
   }
 
   console.warn("❌ Failed to extract background from aiText:", aiText)
-  return "simple white background with no text or graphics" // fallback
 }
 
 /**
