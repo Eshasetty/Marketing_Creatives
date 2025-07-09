@@ -10,103 +10,278 @@ const replicate = new Replicate({
 });
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+/**
+ * Improved parseAiTextFields with better regex patterns and debugging
+ * @param {string} aiText - The AI-generated creative text
+ * @returns {object} Parsed fields object
+ */
+function parseAiTextFields(aiText) {
+  console.log('🔍 DEBUG: Parsing aiText:', aiText ? aiText.substring(0, 200) + '...' : 'NULL/UNDEFINED');
+  
+  if (!aiText || typeof aiText !== 'string') {
+    console.error('❌ aiText is null, undefined, or not a string');
+    return getEmptyFieldsObject();
+  }
 
+  // More flexible regex patterns that handle various formats
+  const patterns = {
+    title: [
+      /Title:\s*(.+)/i,
+      /^Title:\s*(.+)$/im,
+      /\bTitle:\s*(.+)/i
+    ],
+    subtitle: [
+      /Subtitle:\s*(.+)/i,
+      /Sub-title:\s*(.+)/i,
+      /^Subtitle:\s*(.+)$/im
+    ],
+    backgroundDescription: [
+      /background description:\s*(.+)/i,
+      /Background Description:\s*(.+)/i,
+      /background:\s*(.+)/i,
+      /Background:\s*(.+)/i,
+      /^background description:\s*(.+)$/im,
+      /^Background Description:\s*(.+)$/im
+    ],
+    backgroundColor: [
+      /background color:\s*(.+)/i,
+      /Background Color:\s*(.+)/i,
+      /bg color:\s*(.+)/i,
+      /^background color:\s*(.+)$/im
+    ],
+    layout: [
+      /layout:\s*(.+)/i,
+      /Layout:\s*(.+)/i,
+      /^layout:\s*(.+)$/im
+    ],
+    decorativeElements: [
+      /decorative elements:\s*(.+)/i,
+      /Decorative Elements:\s*(.+)/i,
+      /decorative:\s*(.+)/i,
+      /^decorative elements:\s*(.+)$/im
+    ],
+    overallStyle: [
+      /overall style:\s*(.+)/i,
+      /Overall Style:\s*(.+)/i,
+      /style:\s*(.+)/i,
+      /^overall style:\s*(.+)$/im
+    ],
+    slogan: [
+      /slogan:\s*(.+)/i,
+      /Slogan:\s*(.+)/i,
+      /^slogan:\s*(.+)$/im
+    ],
+    legalDisclaimer: [
+      /legal disclaimer:\s*(.+)/i,
+      /Legal Disclaimer:\s*(.+)/i,
+      /disclaimer:\s*(.+)/i,
+      /^legal disclaimer:\s*(.+)$/im
+    ]
+  };
 
+  // CTA patterns
+  const ctaPatterns = {
+    text: [
+      /CTA Button:\s*(.+)/i,
+      /CTA Text:\s*(.+)/i,
+      /Button Text:\s*(.+)/i,
+      /^CTA Button:\s*(.+)$/im
+    ],
+    url: [
+      /CTA URL:\s*(.+)/i,
+      /CTA Link:\s*(.+)/i,
+      /Button URL:\s*(.+)/i,
+      /^CTA URL:\s*(.+)$/im
+    ],
+    style: [
+      /CTA Style:\s*(.+)/i,
+      /Button Style:\s*(.+)/i,
+      /^CTA Style:\s*(.+)$/im
+    ],
+    bgColor: [
+      /CTA BG Color:\s*(.+)/i,
+      /CTA Background Color:\s*(.+)/i,
+      /Button BG Color:\s*(.+)/i,
+      /^CTA BG Color:\s*(.+)$/im
+    ],
+    textColor: [
+      /CTA Text Color:\s*(.+)/i,
+      /Button Text Color:\s*(.+)/i,
+      /^CTA Text Color:\s*(.+)$/im
+    ]
+  };
+
+  // Helper function to try multiple patterns
+  function tryPatterns(patterns, text) {
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+    return '';
+  }
+
+  const fields = {
+    title: tryPatterns(patterns.title, aiText),
+    subtitle: tryPatterns(patterns.subtitle, aiText),
+    backgroundDescription: tryPatterns(patterns.backgroundDescription, aiText),
+    backgroundColor: tryPatterns(patterns.backgroundColor, aiText) || '#E6E6FA',
+    layout: tryPatterns(patterns.layout, aiText),
+    decorativeElements: tryPatterns(patterns.decorativeElements, aiText),
+    overallStyle: tryPatterns(patterns.overallStyle, aiText),
+    slogan: tryPatterns(patterns.slogan, aiText),
+    legalDisclaimer: tryPatterns(patterns.legalDisclaimer, aiText),
+    cta: {
+      text: tryPatterns(ctaPatterns.text, aiText),
+      url: tryPatterns(ctaPatterns.url, aiText),
+      style: tryPatterns(ctaPatterns.style, aiText) || 'primary',
+      bgColor: tryPatterns(ctaPatterns.bgColor, aiText) || '#000000',
+      textColor: tryPatterns(ctaPatterns.textColor, aiText) || '#FFFFFF'
+    }
+  };
+
+  // Debug logging for background description specifically
+  console.log('🔍 DEBUG: Background description extracted:', fields.backgroundDescription);
+  console.log('🔍 DEBUG: All extracted fields:', JSON.stringify(fields, null, 2));
+
+  return fields;
+}
+
+function getEmptyFieldsObject() {
+  return {
+    title: '',
+    subtitle: '',
+    backgroundDescription: '',
+    backgroundColor: '#E6E6FA',
+    layout: '',
+    decorativeElements: '',
+    overallStyle: '',
+    slogan: '',
+    legalDisclaimer: '',
+    cta: {
+      text: '',
+      url: '',
+      style: 'primary',
+      bgColor: '#000000',
+      textColor: '#FFFFFF'
+    }
+  };
+}
+
+function extractBackgroundDescription(aiText) {
+  console.log('🔍 DEBUG: extractBackgroundDescription called with:', aiText ? aiText.substring(0, 100) + '...' : 'NULL/UNDEFINED');
+  
+  const fields = parseAiTextFields(aiText);
+  
+  if (!fields.backgroundDescription) {
+    console.error("❌ Failed to extract background description from aiText");
+    console.error("❌ Available text for debugging:", aiText ? aiText.substring(0, 500) : 'NULL');
+    throw new Error("Background description not found in aiText. Expected format: 'Background Description: ...' or 'background description: ...'");
+  }
+  
+  console.log('✅ Background description extracted successfully:', fields.backgroundDescription);
+  return fields.backgroundDescription;
+}
+
+/**
+ * Enhanced extractPosterDescription - creates a focused visual prompt for poster generation
+ */
+function extractPosterDescription(aiText) {
+  console.log('🔍 DEBUG: extractPosterDescription called with:', aiText ? aiText.substring(0, 100) + '...' : 'NULL/UNDEFINED');
+  
+  const fields = parseAiTextFields(aiText);
+  
+  // Build a compact descriptive prompt
+  const parts = [];
+
+  if (fields.backgroundDescription) {
+    parts.push(fields.backgroundDescription);
+  } else {
+    throw new Error("Background description not found in aiText. Cannot generate poster without background description.");
+  }
+  
+  if (fields.decorativeElements) parts.push(fields.decorativeElements);
+  if (fields.backgroundColor) parts.push(`with a background color of ${fields.backgroundColor}`);
+  if (fields.layout) parts.push(`using a ${fields.layout} layout`);
+  
+  if (fields.title || fields.subtitle) {
+    const textSummary = [fields.title, fields.subtitle].filter(Boolean).join(' — ');
+    parts.push(`poster text: "${textSummary}"`);
+  }
+  
+  if (fields.overallStyle) parts.push(`style: ${fields.overallStyle}`);
+
+  const result = parts.join(', ');
+  console.log('✅ Poster description generated:', result);
+  return result;
+}
+
+// Example usage and testing function
+function testBackgroundExtraction(sampleAiText) {
+  console.log('🧪 Testing background extraction with sample text...');
+  
+  const backgrounds = [
+    extractBackgroundDescription(sampleAiText),
+    extractPosterDescription(sampleAiText)
+  ];
+  
+  console.log('📊 Test results:', {
+    backgroundDescription: backgrounds[0],
+    posterDescription: backgrounds[1]
+  });
+  
+  return backgrounds;
+}
+
+module.exports = {
+  parseAiTextFields,
+  extractBackgroundDescription,
+  extractPosterDescription,
+  testBackgroundExtraction
+};
 function parseAiTextToCreativeObject(aiText) {
- 
+  const fields = parseAiTextFields(aiText);
+  
   const creative = {
-    placement: "center", // Example: derive from aiText
-    dimensions: { width: 1200, height: 800 }, // Example: derive from aiText
-    format: "static", // Example: derive from aiText
+    placement: "center",
+    dimensions: { width: 1200, height: 800 },
+    format: "static",
     background: {
-      color: "#E6E6FA", // Example: derive from aiText
-      type: "solid", // Example: derive from aiText
-      description: extractBackgroundDescription(aiText) // Use your existing extraction
+      color: fields.backgroundColor,
+      type: "solid",
+      description: fields.backgroundDescription
     },
     layout_grid: "free",
     bleed_safe_margins: null,
-    text_blocks: [], // Populate this from aiText
-    cta_buttons: [], // Populate this from aiText
-    brand_logo: {}, // Populate this from aiText
-    brand_colors: [], // Populate this from aiText
-    slogan: "", // Populate this from aiText
-    legal_disclaimer: "", // Populate this from aiText
-    decorative_elements: [] // Populate this from aiText
+    text_blocks: [],
+    cta_buttons: [],
+    brand_logo: {},
+    brand_colors: [],
+    slogan: fields.slogan,
+    legal_disclaimer: fields.legalDisclaimer,
+    decorative_elements: []
   };
 
+  // Add text blocks
+  if (fields.title) creative.text_blocks.push({ type: "headline", text: fields.title });
+  if (fields.subtitle) creative.text_blocks.push({ type: "subhead", text: fields.subtitle });
 
-  const titleMatch = aiText.match(/Title:\s*(.+)/);
-  if (titleMatch) creative.text_blocks.push({ type: "headline", text: titleMatch[1].trim() });
-  
-  const subtitleMatch = aiText.match(/Subtitle:\s*(.+)/);
-  if (subtitleMatch) creative.text_blocks.push({ type: "subhead", text: subtitleMatch[1].trim() });
-
-  const ctaTextMatch = aiText.match(/CTA Button:\s*(.+)/);
-  const ctaUrlMatch = aiText.match(/CTA URL:\s*(.+)/);
-  const ctaBgColorMatch = aiText.match(/CTA BG Color:\s*(.+)/);
-  const ctaTextColorMatch = aiText.match(/CTA Text Color:\s*(.+)/);
-  if (ctaTextMatch && ctaUrlMatch) {
-      creative.cta_buttons.push({
-          text: ctaTextMatch[1].trim(),
-          url: ctaUrlMatch[1].trim(),
-          style: aiText.match(/CTA Style:\s*(.+)/)?.[1]?.trim() || 'primary',
-          bg_color: ctaBgColorMatch?.[1]?.trim() || '#000000',
-          text_color: ctaTextColorMatch?.[1]?.trim() || '#FFFFFF'
-      });
+  // Add CTA button
+  if (fields.cta.text && fields.cta.url) {
+    creative.cta_buttons.push({
+      text: fields.cta.text,
+      url: fields.cta.url,
+      style: fields.cta.style,
+      bg_color: fields.cta.bgColor,
+      text_color: fields.cta.textColor
+    });
   }
-
-  const sloganMatch = aiText.match(/Slogan:\s*(.+)/);
-  if (sloganMatch) creative.slogan = sloganMatch[1].trim();
-
-  const legalDisclaimerMatch = aiText.match(/Legal Disclaimer:\s*(.+)/);
-  if (legalDisclaimerMatch) creative.legal_disclaimer = legalDisclaimerMatch[1].trim();
 
   return creative;
 }
 
-function extractBackgroundDescription(aiText) {
-  const match = aiText.match(/background description:\s*(.+)/i)
-  if (match) {
-    return match[1].trim()
-  }
 
-  console.warn("❌ Failed to extract background from aiText:", aiText)
-}
-
-/**
- * Extracts a concise, visually focused poster description from aiText.
- * This is optimized for image generation (Flux) — no metadata like "CTA", "Slogan", etc.
- * 
- * @param {string} aiText - The full AI-generated creative text
- * @returns {string} A clean visual prompt for generating the poster image
- */
-function extractPosterDescription(aiText) {
-  const backgroundMatch = aiText.match(/background description:\s*(.+)/i);
-  const titleMatch = aiText.match(/title:\s*(.+)/i);
-  const subtitleMatch = aiText.match(/subtitle:\s*(.+)/i);
-  const colorMatch = aiText.match(/background color:\s*(.+)/i);
-  const layoutMatch = aiText.match(/layout:\s*(.+)/i);
-  const decorativeMatch = aiText.match(/decorative elements:\s*(.+)/i);
-  const vibeMatch = aiText.match(/overall style:\s*(.+)/i); // Optional line if you include it
-
-  // Build a compact descriptive prompt
-  const parts = [];
-
-  if (backgroundMatch) parts.push(backgroundMatch[1].trim());
-  if (decorativeMatch) parts.push(decorativeMatch[1].trim());
-  if (colorMatch) parts.push(`with a background color of ${colorMatch[1].trim()}`);
-  if (layoutMatch) parts.push(`using a ${layoutMatch[1].trim()} layout`);
-  if (titleMatch || subtitleMatch) {
-    const textSummary = [
-      titleMatch?.[1]?.trim(),
-      subtitleMatch?.[1]?.trim()
-    ].filter(Boolean).join(' — ');
-    parts.push(`poster text: "${textSummary}"`);
-  }
-  if (vibeMatch) parts.push(`style: ${vibeMatch[1].trim()}`);
-
-  return parts.join(', ');
-}
 
 async function generateFluxImageToStorage(prompt, creativeId, bucketName = 'creative-images', imageType) {
   try {
@@ -257,7 +432,7 @@ async function generateImagesForCreatives(creatives, maxConcurrent = 3) {
       }
 
       const backgroundPrompt = extractBackgroundDescription(aiText);
-      const posterPrompt = aiText;
+      const posterPrompt = extractPosterDescription(aiText);
 
       console.log(`🔍 DEBUG (Batch): Background Prompt for ${creativeId}: "${backgroundPrompt}"`);
       console.log(`🔍 DEBUG (Batch): Poster Prompt for ${creativeId}: "${posterPrompt ? posterPrompt.substring(0, 100) + '...' : 'NULL or UNDEFINED'}"`);

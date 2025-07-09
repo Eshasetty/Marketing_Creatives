@@ -234,49 +234,80 @@ For 'Decorative Element', consider simple shapes like: [line / blob / sticker / 
 
 Output the creative approach using this EXACT format:
 
-Title
+APPROACH:
+Title:
+
 text: [main headline]
+
 font: [font family]
+
 weight: [font weight]
 color: [hex]
+
 alignment: [left / center / right]
+
 case: [sentence / upper / title]
 
-Subtitle 1
+Subtitle 1:
+
 text: [subheadline]
+
 font: [font family]
+
 weight: [font weight]
+
 color: [hex]
+
 alignment: [left / center / right]
+
 case: [sentence / upper / title]
 
-Slogan
+Slogan:
+
 text: [brand slogan or tag line]
+
 Legal Disclaimer:
+
 text: [optional legal text, if applicable]
 
-CTA
+CTA:
+
 text: [CTA button text, e.g., Shop Now, Learn More]
+
 url: [CTA target URL, e.g., https://example.com/shop]
+
 style: [primary / secondary / ghost]
+
 bg_color: [hex]
+
 text_color: [hex]
 
-Background
+Background:
+
 type: [photo / solid / gradient / textured]
+
 color: [hex]
+
 description: [detailed visual description of the background]
+
 Branding:
+
 logo_alt_text: Hollister [or other brand]
 
-Layout
+Layout:
+
 type: [free / 2-col / 3-col / golden-ratio]
+
 placement: [homepage / email / app / social / display]
+
 format: [static / gif / video / html5]
+
 dimensions: [width]x[height]
 
-Decorative Element
+Decorative Element:
+
 shape: [line / blob / sticker / none]
+
 color: [hex]
 
 Only return the "APPROACH:" block and its content. No preambles, no explanations, no extra dialogue.
@@ -529,7 +560,7 @@ placement: [homepage / email / app / social / display]
 format: [static / gif / video / html5]
 dimensions: [width]x[height]
 
-Decorative Element
+Decorative Element:
 shape: [line / blob / sticker / none]
 color: [hex]
 
@@ -789,58 +820,6 @@ function parseStructuredAIText(aiText) {
         decorative_elements: decorativeElements
     };
 }
-// Existing endpoint: Generate images for already existing creatives (e.g., historical ones)
-app.post('/api/generate-images', async (req, res) => {
-  const { campaign_id } = req.body; // Expect a campaign_id to generate images for its creatives
-  
-  if (!campaign_id) {
-    return res.status(400).json({ error: "campaign_id is required to generate images for existing creatives." });
-  }
-
-  if (!process.env.REPLICATE_API_TOKEN) {
-    return res.status(400).json({ error: "REPLICATE_API_TOKEN is not configured in environment variables. Image generation cannot proceed." });
-  }
-
-  try {
-    console.log(`➡️ Request to generate images for creatives under campaign ID: ${campaign_id}.`);
-    // Fetch creatives for the specified campaign
-    const { data: creatives, error } = await supabase
-      .from('creatives_duplicate') // Your creatives table
-      .select('*') // Select all details needed for image generation
-      .eq('campaign_id', campaign_id);
-
-    if (error) {
-        console.error("❌ Supabase Error fetching creatives for image generation:", error.message);
-        throw error;
-    }
-    if (!creatives || creatives.length === 0) {
-      console.warn(`⚠️ No creatives found for campaign ID: ${campaign_id}.`);
-      return res.status(404).json({ error: "No creatives found for this campaign ID to generate images for." });
-    }
-
-    console.log(`🎨 Initiating image generation for ${creatives.length} creatives under campaign ID ${campaign_id}.`);
-    // The generateImagesForCreatives function is expected to take an array of creative objects
-    // and handle image generation and updating the database.
-    const imageResults = await generateImagesForCreatives(creatives);
-
-    console.log("✅ Image generation for existing creatives completed.");
-    res.json({
-      message: "Image generation completed for existing creatives.",
-      campaign_id,
-      total_creatives: creatives.length,
-      images_generated: imageResults.filter(r => r.success).length,
-      images_failed: imageResults.filter(r => !r.success).length,
-      image_results: imageResults // Detailed results for each creative
-    });
-
-  } catch (err) {
-    console.error("❌ Unhandled Error in /api/generate-images endpoint:", err);
-    res.status(500).json({ 
-      error: "Internal Server Error during existing image generation", 
-      details: err.message 
-    });
-  }
-});
 
 // --- Server Start ---
 app.listen(port, () => {
