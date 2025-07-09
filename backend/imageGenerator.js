@@ -23,91 +23,77 @@ function parseAiTextFields(aiText) {
     return getEmptyFieldsObject();
   }
 
-  // More flexible regex patterns that handle various formats
+  // Enhanced patterns to match your actual format
   const patterns = {
     title: [
+      /Title\s*(?:.*?\n)?text:\s*(.+)/i,
       /Title:\s*(.+)/i,
-      /^Title:\s*(.+)$/im,
-      /\bTitle:\s*(.+)/i
+      /^Title:\s*(.+)$/im
     ],
     subtitle: [
+      /Subtitle\s*\d*\s*(?:.*?\n)?text:\s*(.+)/i,
       /Subtitle:\s*(.+)/i,
-      /Sub-title:\s*(.+)/i,
       /^Subtitle:\s*(.+)$/im
     ],
+    // This is the key fix - pattern to match your nested format
     backgroundDescription: [
-      /background description:\s*(.+)/i,
-      /Background Description:\s*(.+)/i,
-      /background:\s*(.+)/i,
-      /Background:\s*(.+)/i,
-      /^background description:\s*(.+)$/im,
-      /^Background Description:\s*(.+)$/im
+      /Background\s*(?:.*?\n)*?(?:.*?\n)*?description:\s*(.+)/i,
+      /Background.*?description:\s*(.+)/is,
+      /description:\s*(.+)/i
     ],
     backgroundColor: [
+      /Background\s*(?:.*?\n)*?color:\s*(.+)/i,
+      /Background.*?color:\s*(.+)/is,
       /background color:\s*(.+)/i,
-      /Background Color:\s*(.+)/i,
-      /bg color:\s*(.+)/i,
-      /^background color:\s*(.+)$/im
+      /Background Color:\s*(.+)/i
     ],
     layout: [
-      /layout:\s*(.+)/i,
-      /Layout:\s*(.+)/i,
-      /^layout:\s*(.+)$/im
+      /Layout\s*(?:.*?\n)*?type:\s*(.+)/i,
+      /Layout.*?type:\s*(.+)/is,
+      /layout:\s*(.+)/i
     ],
     decorativeElements: [
-      /decorative elements:\s*(.+)/i,
-      /Decorative Elements:\s*(.+)/i,
-      /decorative:\s*(.+)/i,
-      /^decorative elements:\s*(.+)$/im
+      /Decorative Element:\s*(?:.*?\n)*?shape:\s*(.+)/i,
+      /Decorative Element.*?shape:\s*(.+)/is,
+      /decorative elements:\s*(.+)/i
     ],
     overallStyle: [
-      /overall style:\s*(.+)/i,
-      /Overall Style:\s*(.+)/i,
-      /style:\s*(.+)/i,
-      /^overall style:\s*(.+)$/im
+      /Style\s*(?:.*?\n)*?type:\s*(.+)/i,
+      /Style.*?type:\s*(.+)/is,
+      /overall style:\s*(.+)/i
     ],
     slogan: [
-      /slogan:\s*(.+)/i,
-      /Slogan:\s*(.+)/i,
-      /^slogan:\s*(.+)$/im
+      /Slogan\s*(?:.*?\n)*?text:\s*(.+)/i,
+      /Slogan.*?text:\s*(.+)/is,
+      /slogan:\s*(.+)/i
     ],
     legalDisclaimer: [
-      /legal disclaimer:\s*(.+)/i,
-      /Legal Disclaimer:\s*(.+)/i,
-      /disclaimer:\s*(.+)/i,
-      /^legal disclaimer:\s*(.+)$/im
+      /Legal Disclaimer:\s*(?:.*?\n)*?text:\s*(.+)/i,
+      /Legal Disclaimer.*?text:\s*(.+)/is,
+      /legal disclaimer:\s*(.+)/i
     ]
   };
 
-  // CTA patterns
   const ctaPatterns = {
     text: [
-      /CTA Button:\s*(.+)/i,
-      /CTA Text:\s*(.+)/i,
-      /Button Text:\s*(.+)/i,
-      /^CTA Button:\s*(.+)$/im
+      /CTA\s*(?:.*?\n)*?text:\s*(.+)/i,
+      /CTA.*?text:\s*(.+)/is
     ],
     url: [
-      /CTA URL:\s*(.+)/i,
-      /CTA Link:\s*(.+)/i,
-      /Button URL:\s*(.+)/i,
-      /^CTA URL:\s*(.+)$/im
+      /CTA\s*(?:.*?\n)*?url:\s*(.+)/i,
+      /CTA.*?url:\s*(.+)/is
     ],
     style: [
-      /CTA Style:\s*(.+)/i,
-      /Button Style:\s*(.+)/i,
-      /^CTA Style:\s*(.+)$/im
+      /CTA\s*(?:.*?\n)*?style:\s*(.+)/i,
+      /CTA.*?style:\s*(.+)/is
     ],
     bgColor: [
-      /CTA BG Color:\s*(.+)/i,
-      /CTA Background Color:\s*(.+)/i,
-      /Button BG Color:\s*(.+)/i,
-      /^CTA BG Color:\s*(.+)$/im
+      /CTA\s*(?:.*?\n)*?bg_color:\s*(.+)/i,
+      /CTA.*?bg_color:\s*(.+)/is
     ],
     textColor: [
-      /CTA Text Color:\s*(.+)/i,
-      /Button Text Color:\s*(.+)/i,
-      /^CTA Text Color:\s*(.+)$/im
+      /CTA\s*(?:.*?\n)*?text_color:\s*(.+)/i,
+      /CTA.*?text_color:\s*(.+)/is
     ]
   };
 
@@ -126,25 +112,23 @@ function parseAiTextFields(aiText) {
     title: tryPatterns(patterns.title, aiText),
     subtitle: tryPatterns(patterns.subtitle, aiText),
     backgroundDescription: tryPatterns(patterns.backgroundDescription, aiText),
-    backgroundColor: tryPatterns(patterns.backgroundColor, aiText) || '#E6E6FA',
+    backgroundColor: tryPatterns(patterns.backgroundColor, aiText) || '#000000',
     layout: tryPatterns(patterns.layout, aiText),
     decorativeElements: tryPatterns(patterns.decorativeElements, aiText),
-    overallStyle: tryPatterns(patterns.overallStyle, aiText),
+    overalStyle: tryPatterns(patterns.overallStyle, aiText),
     slogan: tryPatterns(patterns.slogan, aiText),
     legalDisclaimer: tryPatterns(patterns.legalDisclaimer, aiText),
     cta: {
       text: tryPatterns(ctaPatterns.text, aiText),
       url: tryPatterns(ctaPatterns.url, aiText),
       style: tryPatterns(ctaPatterns.style, aiText) || 'primary',
-      bgColor: tryPatterns(ctaPatterns.bgColor, aiText) || '#000000',
+      bgColor: tryPatterns(ctaPatterns.bgColor, aiText) || '#FF5733',
       textColor: tryPatterns(ctaPatterns.textColor, aiText) || '#FFFFFF'
     }
   };
 
-  // Debug logging for background description specifically
   console.log('🔍 DEBUG: Background description extracted:', fields.backgroundDescription);
   console.log('🔍 DEBUG: All extracted fields:', JSON.stringify(fields, null, 2));
-
   return fields;
 }
 
