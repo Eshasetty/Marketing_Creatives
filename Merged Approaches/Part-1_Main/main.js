@@ -615,13 +615,6 @@ app.post("/api/generate-full-creative", async (req, res) => {
       // Provide all generated HTMLs
       ...htmlOutputs, // <--- Spread the collected HTML outputs here
     });
-  } catch (err) {
-    console.error("❌ Error in /api/generate-full-creative:", err);
-    res.status(500).json({
-      error: "Internal Server Error",
-      details: err.message,
-      step_failed: err.step || "unknown",
-    });
   }
 });
 
