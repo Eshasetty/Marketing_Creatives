@@ -8,7 +8,7 @@ const { generateImagesForCreatives, createEnhancedImagePrompt } = require('./ima
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3000;
 
 // --- Environment Variable Checks ---
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY || !process.env.OPENAI_API_KEY) {
@@ -568,8 +568,10 @@ Only return the "APPROACH:" block and its content. No preambles, no explanations
 });
 
 // NEW ENDPOINT: Save the finalized approach and potentially generate images
+const axios = require('axios'); // Make sure to install: npm install axios
+
 app.post('/api/save', async (req, res) => {
-    const { campaignPrompt, aiText, generateImages = true } = req.body;
+    const { campaignPrompt, aiText, generateImages = true, generateFullCreative = false } = req.body;
   
     if (!campaignPrompt || !aiText) {
       return res.status(400).json({ error: "campaignPrompt and aiText are required to save." });
@@ -584,6 +586,7 @@ app.post('/api/save', async (req, res) => {
   
       let imageResults = [];
       let posterUrl = null;
+      let fullCreativeResults = null;
   
       // Step 2: Generate images if enabled
       if (generateImages && process.env.REPLICATE_API_TOKEN && saveResult.creative) {
@@ -618,13 +621,73 @@ app.post('/api/save', async (req, res) => {
             creative_id: saveResult.creative.creative_id
           }];
         }
-  
       } else if (!generateImages) {
         console.log("ℹ️ Image generation skipped by client.");
       } else if (!process.env.REPLICATE_API_TOKEN) {
         console.warn("⚠️ Missing REPLICATE_API_TOKEN, skipping image generation.");
       } else if (!saveResult.creative) {
         console.warn("⚠️ No creative returned from save operation.");
+      }
+
+      // Step 3: Generate full creative HTML via HTTP request
+      if (saveResult.creative && saveResult.creative.creative_id) {
+        console.log("🎨 Initiating full creative generation via HTTP request...");
+        
+        try {
+   
+          const fullCreativeApiUrl = `http://localhost:3001/api/generate-full-creative`;
+          
+          console.log(`📡 Making HTTP request to: ${fullCreativeApiUrl}`);
+          console.log(`📋 Request payload: { creative_id: ${saveResult.creative.creative_id} }`);
+          
+          // Make the HTTP POST request
+          const response = await axios.post(fullCreativeApiUrl, {
+            creative_id: saveResult.creative.creative_id
+          }, {
+            headers: {
+              'Content-Type': 'application/json',
+              // Add any authentication headers if needed
+              // 'Authorization': `Bearer ${process.env.API_TOKEN}`,
+            },
+          });
+          
+          fullCreativeResults = response.data;
+          console.log("✅ Full creative generation completed successfully via HTTP request.");
+          console.log(`📊 Response keys: ${Object.keys(fullCreativeResults).join(', ')}`);
+          
+        } catch (fullCreativeError) {
+          console.error("❌ Full creative generation HTTP request failed:", fullCreativeError.message);
+          
+          // Handle different types of errors
+          if (fullCreativeError.response) {
+            // Server responded with error status
+            console.error("❌ Error response status:", fullCreativeError.response.status);
+            console.error("❌ Error response data:", fullCreativeError.response.data);
+            
+            fullCreativeResults = {
+              success: false,
+              error: `Full creative generation failed: ${fullCreativeError.response.data?.error || fullCreativeError.message}`,
+              status: fullCreativeError.response.status
+            };
+          } else if (fullCreativeError.request) {
+            // Request was made but no response received
+            console.error("❌ No response received from full creative API");
+            fullCreativeResults = {
+              success: false,
+              error: "Full creative generation failed: No response from API"
+            };
+          } else {
+            // Something else happened
+            fullCreativeResults = {
+              success: false,
+              error: `Full creative generation failed: ${fullCreativeError.message}`
+            };
+          }
+        }
+      } else if (!generateFullCreative) {
+        console.log("ℹ️ Full creative generation skipped by client.");
+      } else if (!saveResult.creative || !saveResult.creative.creative_id) {
+        console.warn("⚠️ No creative ID available for full creative generation.");
       }
   
       // ✅ Final response
@@ -635,6 +698,8 @@ app.post('/api/save', async (req, res) => {
         poster_url: posterUrl,
         image_generation_status: !!posterUrl,
         image_results: imageResults,
+        full_creative_results: fullCreativeResults,
+        full_creative_generated: !!fullCreativeResults && fullCreativeResults.success !== false,
         aiText: aiText
       });
   
@@ -645,7 +710,7 @@ app.post('/api/save', async (req, res) => {
         details: err.message
       });
     }
-  });
+});
   
 
 function parseStructuredAIText(aiText) {
