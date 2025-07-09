@@ -1,5 +1,4 @@
 # html_generator.py
-
 import os
 import requests
 import replicate
@@ -31,8 +30,7 @@ except Exception as e:
 # --- Configuration for file paths ---
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'output')
 FULL_CREATIVE_IMAGE_NAME = "full_creative.jpg"
-# CLEAN_BACKGROUND_IMAGE_NAME is no longer actively generated/used in HTML, but path remains if desired
-CLEAN_BACKGROUND_IMAGE_NAME = "clean_background.jpg"
+CLEAN_BACKGROUND_IMAGE_NAME = "clean_background.jpg" # Still kept for path, but not used for generation
 FINAL_HTML_NAME = "final_creative.html"
 
 FULL_CREATIVE_IMAGE_PATH = os.path.join(OUTPUT_DIR, FULL_CREATIVE_IMAGE_NAME)
@@ -40,8 +38,6 @@ CLEAN_BACKGROUND_IMAGE_PATH = os.path.join(OUTPUT_DIR, CLEAN_BACKGROUND_IMAGE_NA
 FINAL_HTML_PATH = os.path.join(OUTPUT_DIR, FINAL_HTML_NAME)
 
 REPLICATE_MODEL = "black-forest-labs/flux-kontext-pro"
-# REPLICATE_TEXT_REMOVAL_MODEL is no longer used for generating clean background
-# REPLICATE_TEXT_REMOVAL_MODEL = "flux-kontext-apps/text-removal"
 
 # Initialize EasyOCR reader globally
 try:
@@ -84,6 +80,7 @@ def get_font_size_px(size_str):
 def fetch_creative_data_from_supabase(creative_id: str):
     print(f"\n--- Fetching creative data for ID: {creative_id} from Supabase ---", file=sys.stderr)
     try:
+        # We are selecting all columns to get the top-level keys
         response = supabase.table('creatives_duplicate').select('*').eq('creative_id', creative_id).single().execute()
         data = response.data
 
@@ -126,46 +123,45 @@ def fetch_campaign_prompt_from_supabase(campaign_id: str):
 
 def map_supabase_to_required_elements_schema(supabase_creative_data: dict, campaign_prompt: str) -> dict:
     """
-    Maps the data fetched from Supabase into the 'required_elements' schema
-    that the rest of the Python script understands.
+    Maps the data fetched from Supabase (where fields are top-level columns)
+    into the 'required_elements' schema that the rest of the Python script understands.
     """
     print("\n--- Mapping Supabase data to required_elements schema ---", file=sys.stderr)
     print(f"Mapping input - supabase_creative_data type: {type(supabase_creative_data)}, value: {json.dumps(supabase_creative_data, indent=2)}", file=sys.stderr)
     print(f"Mapping input - campaign_prompt: {campaign_prompt}", file=sys.stderr)
 
 
-    # Helper to safely load JSON strings if present, otherwise use default
-    def safe_json_load(data_field, default_value):
-        value = supabase_creative_data.get(data_field)
-        print(f"  safe_json_load for '{data_field}': raw value type={type(value)}, value={value}", file=sys.stderr)
+    # Helper to safely get values, assuming they are already parsed JSON if they are objects/arrays
+    # The server.js code is doing JSON.parse(JSON.stringify(creative, ...)) before inserting,
+    # so Supabase should receive actual JSON objects/arrays for these fields.
+    def safe_get_field(data_dict, field_name, default_value):
+        value = data_dict.get(field_name)
+        # If it's a string, try to parse it, otherwise return as is or default
         if isinstance(value, str):
             try:
                 parsed_value = json.loads(value)
-                print(f"  safe_json_load for '{data_field}': parsed JSON to type={type(parsed_value)}, value={parsed_value}", file=sys.stderr)
-                return parsed_value
+                return parsed_value if parsed_value is not None else default_value
             except json.JSONDecodeError:
-                print(f"Warning: Could not parse JSON string for '{data_field}': {value}. Using default.", file=sys.stderr)
+                print(f"Warning: Field '{field_name}' is a string but not valid JSON: '{value}'. Using default.", file=sys.stderr)
                 return default_value
-        print(f"  safe_json_load for '{data_field}': returning original value or default (not string)", file=sys.stderr)
         return value if value is not None else default_value
 
     # Initialize with default/fallback values for robustness
-    # Use safe_json_load for fields that might be stringified JSON
     mapped_data = {
         "campaign_id": supabase_creative_data.get("campaign_id"),
         "campaign_prompt": campaign_prompt,
-        "placement": supabase_creative_data.get("placement", "social_media"),
-        "dimensions": supabase_creative_data.get("dimensions", {"width": 1080, "height": 1080}),
-        "format": supabase_creative_data.get("format", "static"),
+        "placement": safe_get_field(supabase_creative_data, "placement", "social"), # Corrected default to match server.js
+        "dimensions": safe_get_field(supabase_creative_data, "dimensions", {"width": 1080, "height": 1920}), # Corrected default to match server.js
+        "format": safe_get_field(supabase_creative_data, "format", "static"), # Corrected default to match server.js
         "Canvas": {
             "background": {
-                "color": supabase_creative_data.get("background", {}).get("color", "#ffffff"),
-                "image": None # This is typically derived from imagery.background_image_url
+                "color": safe_get_field(supabase_creative_data.get("background", {}), "color", "#ffffff"),
+                "image": None # This will be set from imagery.background_image_url
             },
-            "layout_grid": supabase_creative_data.get("layout_grid", "free"),
-            "bleed_safe_margins": supabase_creative_data.get("bleed_safe_margins", ""),
+            "layout_grid": safe_get_field(supabase_creative_data, "layout_grid", "free"), # Corrected default
+            "bleed_safe_margins": safe_get_field(supabase_creative_data, "bleed_safe_margins", None), # Should be null/None
             "Imagery": {
-                "background_image_url": None # Initialize to None, will be populated correctly below
+                "background_image_url": None # Will be populated below from the 'imagery' array
             },
             "Text_Blocks": [], # Will be populated below
             "cta_buttons": [], # Will be populated below
@@ -178,105 +174,114 @@ def map_supabase_to_required_elements_schema(supabase_creative_data: dict, campa
     }
     print(f"Initial mapped_data Canvas structure: {json.dumps(mapped_data['Canvas'], indent=2)}", file=sys.stderr)
 
-    # Correctly extract background_image_url from creative_spec.Canvas.Imagery
-    # This is the primary source for the background image URL based on the provided data structure
-    creative_spec_data = supabase_creative_data.get("creative_spec", {})
-    canvas_from_spec = creative_spec_data.get("Canvas", {})
-    imagery_from_canvas_spec = canvas_from_spec.get("Imagery", {})
-    mapped_data["Canvas"]["Imagery"]["background_image_url"] = imagery_from_canvas_spec.get("background_image_url")
-    print(f"Extracted background_image_url for Canvas.Imagery from creative_spec: {mapped_data['Canvas']['Imagery']['background_image_url']}", file=sys.stderr)
+    # --- Populate Imagery and Background Image URL ---
+    # The 'imagery' field is an array of objects. We expect type "background" or "full_poster".
+    # We want the 'background' type image for the HTML background.
+    supabase_imagery = safe_get_field(supabase_creative_data, "imagery", [])
+    print(f"Processed imagery (type={type(supabase_imagery)}): {supabase_imagery}", file=sys.stderr)
+    
+    background_image_url = None
+    if isinstance(supabase_imagery, list):
+        for img_data in supabase_imagery:
+            if isinstance(img_data, dict) and img_data.get("type") == "background" and img_data.get("url"):
+                background_image_url = img_data["url"]
+                break
+    
+    if background_image_url:
+        mapped_data["Canvas"]["Imagery"]["background_image_url"] = background_image_url
+        # Also update the general background image field if needed for other parts of the script
+        mapped_data["Canvas"]["background"]["image"] = background_image_url
+        print(f"Extracted background_image_url from 'imagery' array: {background_image_url}", file=sys.stderr)
+    else:
+        print("Warning: No 'background' type image URL found in 'imagery' array.", file=sys.stderr)
 
 
-    # Populate Text_Blocks
-    supabase_text_blocks = safe_json_load("text_blocks", [])
+    # Populate Text_Blocks (from 'text_blocks' column)
+    supabase_text_blocks = safe_get_field(supabase_creative_data, "text_blocks", [])
     print(f"Processed text_blocks (type={type(supabase_text_blocks)}): {supabase_text_blocks}", file=sys.stderr)
     for block in supabase_text_blocks:
         if block is not None and isinstance(block, dict):
+            # Map fields from server.js's parseStructuredAIText to html_generator's expected schema
             mapped_data["Canvas"]["Text_Blocks"].append({
-                "font": block.get("font_family", "sans-serif"),
-                "size": block.get("size", "medium"),
+                "font": block.get("font_family", "Inter"), # Default based on server.js
+                "size": block.get("font_size", "medium"), # Adjusted from 'font_size' or 'size'
                 "text": block.get("text", ""),
                 "color": block.get("color", "#000000"),
-                "position": block.get("position", "center")
+                "position": block.get("alignment", "center") # Map 'alignment' to 'position'
             })
         else:
             print(f"Warning: Skipping invalid Text Block element: {block}", file=sys.stderr)
 
 
-    # Populate CTA Buttons
-    supabase_cta_buttons = safe_json_load("cta_buttons", [])
+    # Populate CTA Buttons (from 'cta_buttons' column)
+    supabase_cta_buttons = safe_get_field(supabase_creative_data, "cta_buttons", [])
     print(f"Processed cta_buttons (type={type(supabase_cta_buttons)}): {supabase_cta_buttons}", file=sys.stderr)
     for cta in supabase_cta_buttons:
         if cta is not None and isinstance(cta, dict):
             mapped_data["Canvas"]["cta_buttons"].append({
-                "text": cta.get("text", ""),
-                "color": cta.get("text_color", "#ffffff"),
-                "position": cta.get("position", "bottom-center"),
-                "background": cta.get("bg_color", "#007bff")
+                "text": cta.get("text", "Shop Now"), # Default based on server.js
+                "color": cta.get("text_color", "#ffffff"), # Map text_color
+                "position": "bottom-center", # Assume a default position if not explicit in server.js output
+                "background": cta.get("bg_color", "#007bff") # Map bg_color
             })
         else:
             print(f"Warning: Skipping invalid CTA button element: {cta}", file=sys.stderr)
 
 
-    # Populate Brand Colors
-    supabase_brand_colors = safe_json_load("brand_colors", [])
+    # Populate Brand Logo (from 'brand_logo' column)
+    supabase_brand_logo = safe_get_field(supabase_creative_data, "brand_logo", {})
+    print(f"Processed brand_logo (type={type(supabase_brand_logo)}): {supabase_brand_logo}", file=sys.stderr)
+    if isinstance(supabase_brand_logo, dict):
+        mapped_data["Canvas"]["brand_logo"] = {
+            "url": supabase_brand_logo.get("url", None), # Server.js currently doesn't populate a URL for brand_logo
+            "text_alt": supabase_brand_logo.get("text_alt", "Brand Logo"),
+            "size": "medium", # Assume default, server.js doesn't specify size here
+            "position": "top-left" # Assume default
+        }
+    else:
+        print(f"Warning: Unexpected type for brand_logo: {type(supabase_brand_logo)}. Using default.", file=sys.stderr)
+        mapped_data["Canvas"]["brand_logo"] = {
+            "url": None, "text_alt": "Brand Logo", "size": "medium", "position": "top-left"
+        }
+
+    # Populate Brand Colors (from 'brand_colors' column)
+    # This column is an empty array in server.js initially. You might populate it later.
+    supabase_brand_colors = safe_get_field(supabase_creative_data, "brand_colors", [])
     print(f"Processed brand_colors (type={type(supabase_brand_colors)}): {supabase_brand_colors}", file=sys.stderr)
     if isinstance(supabase_brand_colors, list):
         mapped_data["Canvas"]["brand_colors"] = supabase_brand_colors
-    elif isinstance(supabase_brand_colors, dict):
-        colors_list = []
-        if 'primary' in supabase_brand_colors: colors_list.append(supabase_brand_colors['primary'])
-        if 'accent' in supabase_brand_colors: colors_list.append(supabase_brand_colors['accent'])
-        if 'secondary' in supabase_brand_colors: colors_list.append(supabase_brand_colors['secondary'])
-        mapped_data["Canvas"]["brand_colors"] = colors_list
-    else: # Fallback if it's neither list nor dict after safe_json_load
+    # Removed the dict parsing, as server.js now directly puts a list
+    else:
+        print(f"Warning: Unexpected type for brand_colors: {type(supabase_brand_colors)}. Setting to empty list.", file=sys.stderr)
         mapped_data["Canvas"]["brand_colors"] = []
 
 
-    # Populate Decorative Elements
-    supabase_decorative_elements = safe_json_load("decorative_elements", [])
+    # Populate Slogan (from 'slogan' column)
+    mapped_data["Canvas"]["slogans"] = safe_get_field(supabase_creative_data, "slogan", None)
+    print(f"Processed slogans: {mapped_data['Canvas']['slogans']}", file=sys.stderr)
+
+    # Populate Legal Disclaimer (from 'legal_disclaimer' column)
+    mapped_data["Canvas"]["legal_disclaimer"] = safe_get_field(supabase_creative_data, "legal_disclaimer", None)
+    print(f"Processed legal_disclaimer: {mapped_data['Canvas']['legal_disclaimer']}", file=sys.stderr)
+
+
+    # Populate Decorative Elements (from 'decorative_elements' column)
+    supabase_decorative_elements = safe_get_field(supabase_creative_data, "decorative_elements", [])
     print(f"Processed decorative_elements (type={type(supabase_decorative_elements)}): {supabase_decorative_elements}", file=sys.stderr)
     if isinstance(supabase_decorative_elements, list):
         for element in supabase_decorative_elements:
             if element is not None and isinstance(element, dict):
                 mapped_data["Canvas"]["decorative_elements"].append({
-                    "shape_type": element.get("shape_type", "geometric"),
+                    "shape_type": element.get("shape_type", "none"), # Default from server.js
                     "color": element.get("color", "#cccccc"),
-                    "animation": element.get("animation", "subtle")
+                    "animation": "subtle" # Default, not explicitly in server.js output
                 })
             else:
                 print(f"Warning: Skipping invalid decorative element: {element}", file=sys.stderr)
-    elif supabase_decorative_elements == "" or supabase_decorative_elements is None:
-        mapped_data["Canvas"]["decorative_elements"] = []
-    else: # Fallback if it's not a list after safe_json_load
-        print(f"Warning: Unexpected type for decorative_elements after parsing: {type(supabase_decorative_elements)}. Setting to empty list.", file=sys.stderr)
-        mapped_data["Canvas"]["decorative_elements"] = []
-
-
-    # Handle slogans and legal_disclaimer
-    slogans_raw = safe_json_load("slogan", None) # Use safe_json_load
-    mapped_data["Canvas"]["slogans"] = slogans_raw if slogans_raw != "null" else None
-    print(f"Processed slogans: {mapped_data['Canvas']['slogans']}", file=sys.stderr)
-
-    legal_disclaimer_raw = safe_json_load("legal_disclaimer", None) # Use safe_json_load
-    mapped_data["Canvas"]["legal_disclaimer"] = legal_disclaimer_raw if legal_disclaimer_raw != "null" else None
-    print(f"Processed legal_disclaimer: {mapped_data['Canvas']['legal_disclaimer']}", file=sys.stderr)
-
-    # Handle brand_logo
-    brand_logo_raw = safe_json_load("brand_logo", {})
-    print(f"Processed brand_logo (type={type(brand_logo_raw)}): {brand_logo_raw}", file=sys.stderr)
-    if isinstance(brand_logo_raw, dict):
-        mapped_data["Canvas"]["brand_logo"] = {
-            "url": brand_logo_raw.get("url", None),
-            "text_alt": brand_logo_raw.get("text_alt", "Brand Logo"),
-            "size": brand_logo_raw.get("size", "medium"),
-            "position": brand_logo_raw.get("position", "top-left")
-        }
+    # Removed the empty string check as list handling should cover it.
     else:
-        print(f"Warning: Unexpected type for brand_logo after parsing: {type(brand_logo_raw)}. Using default.", file=sys.stderr)
-        mapped_data["Canvas"]["brand_logo"] = {
-            "url": None, "text_alt": "Brand Logo", "size": "medium", "position": "top-left"
-        }
+        print(f"Warning: Unexpected type for decorative_elements: {type(supabase_decorative_elements)}. Setting to empty list.", file=sys.stderr)
+        mapped_data["Canvas"]["decorative_elements"] = []
 
 
     print("Mapped schema:", json.dumps(mapped_data, indent=2), file=sys.stderr)
@@ -301,23 +306,20 @@ def generate_full_creative(replicate_client, creative_data):
     campaign_prompt = creative_data.get("campaign_prompt", "Generate a marketing creative.")
     main_prompt = f"{campaign_prompt}. "
 
-    dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1080})
+    dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1920}) # Updated default for consistency
     replicate_input["width"] = dimensions.get("width", 1080)
-    replicate_input["height"] = dimensions.get("height", 1080)
+    replicate_input["height"] = dimensions.get("height", 1920) # Updated default for consistency
     print(f"Replicate dimensions: {replicate_input['width']}x{replicate_input['height']}", file=sys.stderr)
 
 
-    imagery_raw = canvas_data.get("Imagery", {})
-    background_image_url_from_json = None
+    # Pull background_image_url from the mapped Canvas.Imagery
+    background_image_url_from_mapped_schema = canvas_data.get("Imagery", {}).get("background_image_url")
+    print(f"Background image URL from mapped schema for Replicate: {background_image_url_from_mapped_schema}", file=sys.stderr)
 
-    background_image_url_from_json = imagery_raw.get("background_image_url")
-    print(f"Background image URL from JSON: {background_image_url_from_json}", file=sys.stderr)
-
-
-    if background_image_url_from_json:
-        replicate_input["image"] = background_image_url_from_json
+    if background_image_url_from_mapped_schema:
+        replicate_input["image"] = background_image_url_from_mapped_schema
         main_prompt += "Integrate these elements onto the provided background image. "
-        print(f"Using background_image_url from JSON for AI generation: {background_image_url_from_json}", file=sys.stderr)
+        print(f"Using background_image_url from mapped schema for AI generation: {background_image_url_from_mapped_schema}", file=sys.stderr)
     elif canvas_data.get("background", {}).get("color"):
         main_prompt += f"Use a background color of {canvas_data['background']['color']}. "
         print(f"Using background color for AI generation: {canvas_data['background']['color']}", file=sys.stderr)
@@ -331,17 +333,21 @@ def generate_full_creative(replicate_client, creative_data):
     print(f"Text_Blocks for Replicate: {text_blocks}", file=sys.stderr)
     for block in text_blocks:
         processed_text = block.get("text", "")
-        sensitive_terms = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
-        if any(term.lower() in processed_text.lower() for term in sensitive_terms):
-            print(f"Warning: Potentially sensitive term '{processed_text}' detected in Text Block. Generalizing for AI prompt.", file=sys.stderr)
-            processed_text = "Apparel Brand Name"
+        # Use a more robust check for sensitive terms if necessary
+        # The prompt for Replicate should use actual text for better generation,
+        # but if brand names are truly sensitive for generation, you can filter here.
+        # For actual display in HTML, you'd use the original text.
+        # sensitive_terms = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
+        # if any(term.lower() in processed_text.lower() for term in sensitive_terms):
+        #    print(f"Warning: Potentially sensitive term '{processed_text}' detected in Text Block. Generalizing for AI prompt.", file=sys.stderr)
+        #    processed_text = "Apparel Brand Name"
 
         texts_for_replicate.append({
-            "text": block.get("text", ""),
+            "text": block.get("text", ""), # Use original text for Replicate
             "font_size": get_font_size_px(block.get("size", "medium")),
             "position": block.get("position", "center")
         })
-        main_prompt += f"Include '{processed_text}' text in {block.get('color', 'black')} at {block.get('position', 'center')}. "
+        main_prompt += f"Include '{block.get('text', '')}' text in {block.get('color', 'black')} at {block.get('position', 'center')}. "
 
     cta_buttons_raw = canvas_data.get("cta_buttons", [])
     if not isinstance(cta_buttons_raw, list):
@@ -352,49 +358,46 @@ def generate_full_creative(replicate_client, creative_data):
 
     for cta in cta_buttons:
         processed_cta_text = cta.get("text", "")
-        sensitive_terms = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
-        if any(term.lower() in processed_cta_text.lower() for term in sensitive_terms):
-            print(f"Warning: Potentially sensitive term '{processed_cta_text}' detected in CTA. Generalizing for AI prompt.", file=sys.stderr)
-            processed_cta_text = "Shop Now"
+        # sensitive_terms = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
+        # if any(term.lower() in processed_cta_text.lower() for term in sensitive_terms):
+        #    print(f"Warning: Potentially sensitive term '{processed_cta_text}' detected in CTA. Generalizing for AI prompt.", file=sys.stderr)
+        #    processed_cta_text = "Shop Now"
 
         texts_for_replicate.append({
-            "text": cta.get("text", ""),
+            "text": cta.get("text", ""), # Use original text for Replicate
             "font_size": get_font_size_px("large"),
             "position": cta.get("position", "bottom-center")
         })
-        main_prompt += f"Add a call-to-action button with text '{processed_cta_text}' and background color {cta.get('background', 'red')} at {cta.get('position', 'bottom-center')}. "
+        main_prompt += f"Add a call-to-action button with text '{cta.get('text', 'Shop Now')}' and background color {cta.get('background', 'red')} at {cta.get('position', 'bottom-center')}. "
 
     brand_logo_info = canvas_data.get("brand_logo", {})
     brand_logo_text_alt = brand_logo_info.get("text_alt")
-    brand_logo_url = brand_logo_info.get("url")
+    brand_logo_url = brand_logo_info.get("url") # This URL might not be populated from server.js yet
     print(f"Brand Logo Info for Replicate: {brand_logo_info}", file=sys.stderr)
 
 
     if brand_logo_url and isinstance(brand_logo_url, str) and brand_logo_url.startswith("http"):
-        main_prompt += f"Integrate a brand logo image from {brand_logo_url} at {brand_logo_info.get('position', 'top-left')} with {brand_logo_info.get('size', 'medium')} size. "
-        print(f"Note: Model '{REPLICATE_MODEL}' interprets logo URL from prompt. Direct logo input not available.", file=sys.stderr)
+        # If the model supports directly integrating images via URL in 'image_overrides' etc.
+        # This current model (flux-kontext-pro) seems to use 'image' for background.
+        # For actual logo placement, you might need a different approach or model.
+        # For now, let's just add it to prompt and rely on text for now for flux-kontext-pro
+        main_prompt += f"Integrate a brand logo image visually similar to the one at {brand_logo_url} at {brand_logo_info.get('position', 'top-left')} with {brand_logo_info.get('size', 'medium')} size. "
+        print(f"Note: Model '{REPLICATE_MODEL}' interprets logo URL from prompt. Direct logo input not available in current 'image' field.", file=sys.stderr)
     elif brand_logo_text_alt:
         processed_brand_name = brand_logo_text_alt
-        sensitive_brands = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
-        if any(brand.lower() in brand_logo_text_alt.lower() for brand in sensitive_brands):
-            print(f"Warning: Potentially sensitive brand name '{brand_logo_text_alt}' detected. Generalizing for AI prompt.", file=sys.stderr)
-            processed_brand_name = "Generic Apparel Brand"
+        # sensitive_brands = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
+        # if any(brand.lower() in brand_logo_text_alt.lower() for brand in sensitive_brands):
+        #    print(f"Warning: Potentially sensitive brand name '{brand_logo_text_alt}' detected. Generalizing for AI prompt.", file=sys.stderr)
+        #    processed_brand_name = "Generic Apparel Brand"
 
         texts_for_replicate.append({
-            "text": brand_logo_text_alt,
+            "text": brand_logo_text_alt, # Use original text for Replicate
             "font_size": get_font_size_px(brand_logo_info.get("size", "medium")),
             "position": brand_logo_info.get("position", "top-left")
         })
-        main_prompt += f"Include brand logo text: '{processed_brand_name}' at {brand_logo_info.get('position', 'top-left')}. "
-    elif brand_logo_info.get("logos"):
-        for logo_text in brand_logo_info["logos"]:
-            generic_logo_text = logo_text # Assuming if 'logos' is used, it's already generic or doesn't need filtering here
-            texts_for_replicate.append({
-                "text": generic_logo_text,
-                "font_size": get_font_size_px("medium"),
-                "position": "top-left"
-            })
-            main_prompt += f"Include brand logo text: '{generic_logo_text}'. "
+        main_prompt += f"Include brand logo text: '{brand_logo_text_alt}' at {brand_logo_info.get('position', 'top-left')}. "
+    # Removed the 'logos' key handling as it's not present in the server.js output for brand_logo
+
 
     slogans = canvas_data.get("slogans")
     if slogans and isinstance(slogans, str):
@@ -411,24 +414,17 @@ def generate_full_creative(replicate_client, creative_data):
 
 
     brand_colors_list = canvas_data.get("brand_colors", [])
-    if isinstance(brand_colors_list, dict):
-        colors_str = []
-        if 'primary' in brand_colors_list: colors_str.append(f"primary {brand_colors_list['primary']}")
-        if 'accent' in brand_colors_list: colors_str.append(f"accent {brand_colors_list['accent']}")
-        if 'secondary' in brand_colors_list: colors_str.append(f"secondary {brand_colors_list['secondary']}")
-        if colors_str:
-            main_prompt += f"Use brand colors: {', '.join(colors_str)}. "
-    elif isinstance(brand_colors_list, list):
-        main_prompt += f"Use brand colors: {', '.join(brand_colors_list)}. " # Corrected line: Removed extraneous Arabic text
+    if isinstance(brand_colors_list, list) and brand_colors_list:
+        main_prompt += f"Use brand colors: {', '.join(brand_colors_list)}. "
     print(f"Brand Colors for Replicate: {brand_colors_list}", file=sys.stderr)
 
 
     decorative_elements_raw = canvas_data.get("decorative_elements", [])
     if isinstance(decorative_elements_raw, list):
         for element in decorative_elements_raw:
-            main_prompt += f"Add a {element.get('shape_type', 'geometric')} decorative element with color {element.get('color', '')} and {element.get('animation', 'subtle')} animation. "
-    elif isinstance(decorative_elements_raw, str) and decorative_elements_raw.strip() == "":
-        pass
+            if element is not None and isinstance(element, dict):
+                main_prompt += f"Add a {element.get('shape_type', 'geometric')} decorative element with color {element.get('color', '')} and {element.get('animation', 'subtle')} animation. "
+    # Removed the empty string check as list handling should cover it.
     else:
         print(f"Warning: Unexpected type for decorative_elements: {type(decorative_elements_raw)}. Skipping.", file=sys.stderr)
     print(f"Decorative Elements for Replicate: {decorative_elements_raw}", file=sys.stderr)
@@ -468,47 +464,47 @@ def generate_full_creative(replicate_client, creative_data):
     return output_url
 
 # ------------------------------------------------------
-# Phase 2: Generate Clean Background Image (NO LONGER USED)
+# Phase 2: Generate Clean Background Image (NO LONGER USED) - kept for context
 # ------------------------------------------------------
 # This function is removed from the main workflow as per your request.
 # The REPLICATE_TEXT_REMOVAL_MODEL is also no longer listed in the script.
 # def generate_clean_background(replicate_client, full_creative_image_url, creative_data):
-#     """
-#     Generates a clean background image by re-prompting the model to remove text/branding.
-#     """
-#     print("\n--- Phase 2: Generating Clean Background Image ---", file=sys.stderr)
-#     canvas_data = creative_data.get("Canvas", {})
-#     dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1080})
+#     """
+#     Generates a clean background image by re-prompting the model to remove text/branding.
+#     """
+#     print("\n--- Phase 2: Generating Clean Background Image ---", file=sys.stderr)
+#     canvas_data = creative_data.get("Canvas", {})
+#     dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1080})
 
-#     clean_prompt = (
-#         "remove all text from the image. "
-#     )
+#     clean_prompt = (
+#         "remove all text from the image. "
+#     )
 
-#     clean_replicate_input = {
-#         "input_image": full_creative_image_url,
-#         "prompt": clean_prompt,
-#         "width": dimensions.get("width", 1080),
-#         "height": dimensions.get("height", 1080),
-#     }
+#     clean_replicate_input = {
+#         "input_image": full_creative_image_url,
+#         "prompt": clean_prompt,
+#         "width": dimensions.get("width", 1080),
+#         "height": dimensions.get("height", 1080),
+#     }
 
-#     print("\n--- Replicate Model Input (Clean Background) ---", file=sys.stderr)
-#     print(f"Model: {REPLICATE_TEXT_REMOVAL_MODEL}", file=sys.stderr)
-#     print(f"Input Payload: {json.dumps(clean_replicate_input, indent=2)}", file=sys.stderr)
-#     print("-------------------------------------------------\n", file=sys.stderr)
+#     print("\n--- Replicate Model Input (Clean Background) ---", file=sys.stderr)
+#     print(f"Model: {REPLICATE_TEXT_REMOVAL_MODEL}", file=sys.stderr)
+#     print(f"Input Payload: {json.dumps(clean_replicate_input, indent=2)}", file=sys.stderr)
+#     print("-------------------------------------------------\n", file=sys.stderr)
 
-#     try:
-#         replicate_output_object = replicate_client.run(REPLICATE_TEXT_REMOVAL_MODEL, input=clean_replicate_input)
-#         clean_background_url = replicate_output_object.url
-#     except Exception as e:
-#         print(f"Error calling Replicate model '{REPLICATE_TEXT_REMOVAL_MODEL}': {e}", file=sys.stderr)
-#         raise
+#     try:
+#         replicate_output_object = replicate_client.run(REPLICATE_TEXT_REMOVAL_MODEL, input=clean_replicate_input)
+#         clean_background_url = replicate_output_object.url
+#     except Exception as e:
+#         print(f"Error calling Replicate model '{REPLICATE_TEXT_REMOVAL_MODEL}': {e}", file=sys.stderr)
+#         raise
 
-#     print(f"Replicate returned clean background image URL: {clean_background_url}", file=sys.stderr)
+#     print(f"Replicate returned clean background image URL: {clean_background_url}", file=sys.stderr)
 
-#     if not download_image(clean_background_url, CLEAN_BACKGROUND_IMAGE_PATH):
-#         raise Exception("Failed to download clean background image.")
+#     if not download_image(clean_background_url, CLEAN_BACKGROUND_IMAGE_PATH):
+#         raise Exception("Failed to download clean background image.")
 
-#     return clean_background_url
+#     return clean_background_url
 
 # ------------------------------------------------------
 # Phase 3: Extract Text Positions using EasyOCR
@@ -553,7 +549,7 @@ def extract_text_positions(image_path):
 
             cv2.rectangle(debug_img, (x, y), (x + width, y + height), (0, 255, 0), 2)
             cv2.putText(debug_img, f"{text.strip()} ({conf:.2f})", (x, y - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
 
     ocr_boxes.sort(key=lambda b: (b['y'], b['x']))
 
@@ -581,9 +577,9 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
     print(f"HTML generation input - creative_data dimensions: {creative_data.get('dimensions')}", file=sys.stderr)
 
 
-    requested_dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1080})
+    requested_dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1920})
     requested_width = requested_dimensions.get("width", 1080)
-    requested_height = requested_dimensions.get("height", 1080)
+    requested_height = requested_dimensions.get("height", 1920)
 
     # Use the full creative image that was generated by Replicate for dimension verification
     actual_img = cv2.imread(FULL_CREATIVE_IMAGE_PATH)
@@ -667,7 +663,7 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
             text_content = box['text']
 
             base_font_size = box['height'] * 0.9
-            estimated_chars_per_line = box['width'] / (base_font_size * 0.6) if base_font_size * 0.6 > 0 else len(text_content)
+            estimated_chars_per_line = box['width'] / (base_font_size * 0.6) if (base_font_size * 0.6) > 0 else len(text_content)
 
             if len(text_content) > estimated_chars_per_line * 1.2 and estimated_chars_per_line > 0:
                 scaling_factor = box['width'] / (len(text_content) * base_font_size * 0.6) if (len(text_content) * base_font_size * 0.6) > 0 else 1
