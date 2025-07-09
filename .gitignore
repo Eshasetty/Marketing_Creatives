@@ -5,3 +5,7 @@ Merged Approaches/Merged_Approach-venv
 Merged Approaches/Part-1_Main/package-lock.json
 Merged Approaches/Part-1_Main/package.json
 Merged Approaches/Part-1_Main/.env
+package.json
+package-lock.json
+backend/.env
+venv-full/
