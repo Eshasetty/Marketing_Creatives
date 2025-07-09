@@ -1,4 +1,4 @@
-# creative_html_generator3.py
+# html_generator.py
 
 import os
 import requests
