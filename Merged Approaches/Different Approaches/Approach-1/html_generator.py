@@ -74,6 +74,7 @@ def fetch_creative_data_from_supabase(creative_id: str):
     # Changed to stderr
     print(f"\n--- Fetching creative data for ID: {creative_id} from Supabase ---", file=sys.stderr)
     try:
+        # We are selecting all columns to get the top-level keys
         response = supabase.table('creatives_duplicate').select('*').eq('creative_id', creative_id).single().execute()
         data = response.data
 
@@ -84,6 +85,7 @@ def fetch_creative_data_from_supabase(creative_id: str):
 
         # Changed to stderr
         print(f"Creative data fetched successfully for ID: {creative_id}", file=sys.stderr)
+        print(f"Raw Supabase creative data: {json.dumps(data, indent=2)}", file=sys.stderr) # Added for debugging
         return data
     except Exception as e:
         # Already stderr, keeping for consistency
@@ -98,10 +100,10 @@ def fetch_campaign_prompt_from_supabase(campaign_id: str):
     print(f"\n--- Fetching campaign prompt for ID: {campaign_id} from Supabase ---", file=sys.stderr)
     try:
         response = supabase.table('campaigns_duplicate') \
-                            .select('campaign_prompt') \
-                            .eq('campaign_id', campaign_id) \
-                            .single() \
-                            .execute()
+                           .select('campaign_prompt') \
+                           .eq('campaign_id', campaign_id) \
+                           .single() \
+                           .execute()
 
         data = response.data
 
@@ -121,54 +123,73 @@ def fetch_campaign_prompt_from_supabase(campaign_id: str):
 def map_supabase_to_required_elements_schema(supabase_creative_data: dict, campaign_prompt: str) -> dict:
     # Changed to stderr
     print("\n--- Mapping Supabase data to required_elements schema (Python) ---", file=sys.stderr)
+    print(f"Mapping input - supabase_creative_data type: {type(supabase_creative_data)}, value: {json.dumps(supabase_creative_data, indent=2)}", file=sys.stderr)
+    print(f"Mapping input - campaign_prompt: {campaign_prompt}", file=sys.stderr)
 
-    # The full creative spec is stored under the 'creative_spec' column in Supabase
-    full_creative_spec = supabase_creative_data.get("creative_spec", {})
+    # Safely get the 'creative_spec' column, which should contain the entire JSON structure
+    # The server.js code does JSON.parse(JSON.stringify(creative_data))
+    # so Supabase should store it as a proper JSONB object.
+    creative_spec = supabase_creative_data.get("creative_spec")
 
-    # Access Canvas and other top-level fields from the full_creative_spec
-    canvas_data = full_creative_spec.get("Canvas", {})
-    dimensions = full_creative_spec.get("dimensions", {"width": 1080, "height": 1080})
-    placement = full_creative_spec.get("placement", "social_media")
-    format_val = full_creative_spec.get("format", "static")
+    if not isinstance(creative_spec, dict):
+        # If 'creative_spec' is not a dictionary, it means it's missing or malformed.
+        # This is a critical error as the rest of the logic expects it.
+        print(f"Error: 'creative_spec' column is missing or not a valid JSON object. Value: {creative_spec}", file=sys.stderr)
+        raise ValueError("Invalid or missing 'creative_spec' in Supabase data.")
+
+    # Now, extract data from within the 'creative_spec' dictionary
+    canvas_data = creative_spec.get("Canvas", {})
+    dimensions = creative_spec.get("dimensions", {"width": 1080, "height": 1920}) # Default to 1080x1920 as per Replicate
+    placement = creative_spec.get("placement", "social_media")
+    format_val = creative_spec.get("format", "static")
+
+    # Helper to safely get nested values with defaults
+    def safe_get_nested(data_dict, keys, default_value):
+        temp = data_dict
+        for key in keys:
+            if isinstance(temp, dict):
+                temp = temp.get(key)
+            else:
+                return default_value
+        return temp if temp is not None else default_value
 
     mapped_data = {
-        "campaign_id": supabase_creative_data.get("campaign_id"),
-        "campaign_prompt": campaign_prompt,
+        "campaign_id": supabase_creative_data.get("campaign_id"), # This is a top-level column
+        "campaign_prompt": campaign_prompt, # This comes from the function argument
         "placement": placement,
         "dimensions": dimensions,
         "format": format_val,
         "Canvas": {
-            "background": canvas_data.get("background", {"color": "#ffffff", "image": None, "description": ""}),
-            "layout_grid": canvas_data.get("layout_grid", "free"),
-            "bleed_safe_margins": canvas_data.get("bleed_safe_margins", ""),
+            "background": safe_get_nested(canvas_data, ["background"], {"color": "#ffffff", "image": None, "description": ""}),
+            "layout_grid": safe_get_nested(canvas_data, ["layout_grid"], "free"),
+            "bleed_safe_margins": safe_get_nested(canvas_data, ["bleed_safe_margins"], ""),
             "Imagery": {
-                # CRITICAL FIX: Access background_image_url from canvas_data.Imagery
-                "background_image_url": canvas_data.get("Imagery", {}).get("background_image_url")
+                "background_image_url": safe_get_nested(canvas_data, ["Imagery", "background_image_url"], None)
             },
-            "Text_Blocks": canvas_data.get("Text_Blocks", []),
-            "cta_buttons": canvas_data.get("cta_buttons", []),
-            "brand_logo": canvas_data.get("brand_logo", {
-                "url": None,
+            "Text_Blocks": safe_get_nested(canvas_data, ["Text_Blocks"], []),
+            "cta_buttons": safe_get_nested(canvas_data, ["cta_buttons"], []),
+            "brand_logo": safe_get_nested(canvas_data, ["brand_logo"], {
+                "url": None, # Assuming server.js doesn't populate this directly yet
                 "text_alt": "Brand Logo",
                 "size": "medium",
                 "position": "top-left"
             }),
-            "brand_colors": canvas_data.get("brand_colors", []),
-            "slogans": canvas_data.get("slogans"),
-            "legal_disclaimer": canvas_data.get("legal_disclaimer"),
-            "decorative_elements": canvas_data.get("decorative_elements", [])
+            "brand_colors": safe_get_nested(canvas_data, ["brand_colors"], []),
+            "slogans": safe_get_nested(canvas_data, ["slogans"], None),
+            "legal_disclaimer": safe_get_nested(canvas_data, ["legal_disclaimer"], None),
+            "decorative_elements": safe_get_nested(canvas_data, ["decorative_elements"], [])
         }
     }
 
-    # Further normalization for lists
+    # Ensure lists are actually lists, handling potential empty string or non-list values from DB
     if not isinstance(mapped_data["Canvas"]["brand_colors"], list):
-        if isinstance(mapped_data["Canvas"]["brand_colors"], dict):
-            mapped_data["Canvas"]["brand_colors"] = list(mapped_data["Canvas"]["brand_colors"].values())
-        else:
-            mapped_data["Canvas"]["brand_colors"] = []
+        print(f"Warning: 'brand_colors' was not a list, converting to empty list. Value: {mapped_data['Canvas']['brand_colors']}", file=sys.stderr)
+        mapped_data["Canvas"]["brand_colors"] = []
 
     if not isinstance(mapped_data["Canvas"]["decorative_elements"], list):
+        print(f"Warning: 'decorative_elements' was not a list, converting to empty list. Value: {mapped_data['Canvas']['decorative_elements']}", file=sys.stderr)
         mapped_data["Canvas"]["decorative_elements"] = []
+    # This check is less critical now if safe_get_nested correctly defaults to [], but good for robustness
     if mapped_data["Canvas"]["decorative_elements"] == "" or mapped_data["Canvas"]["decorative_elements"] is None:
         mapped_data["Canvas"]["decorative_elements"] = []
 
@@ -294,6 +315,9 @@ and texts. Ensure it looks like a polished marketing ad.
     except Exception as e:
         # Already stderr, keeping for consistency
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        # Added traceback for better debugging
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
