@@ -571,17 +571,7 @@ async function generateHtmlFromPython(scriptPath, creativeId, campaignPrompt) {
 
 // --- CONSOLIDATED API ENDPOINT ---
 app.post("/api/generate-full-creative", async (req, res) => {
-  const { campaignPrompt } = req.body;
-
-  if (!campaignPrompt) {
-    return res.status(400).json({ error: "campaignPrompt is required" });
-  }
-
-  try {
-    console.log(
-      "🌟 Starting full creative generation process for prompt:",
-      campaignPrompt
-    );
+  const { creativeId } = req.body;
 
     // --- Step 6: Generate HTML using MULTIPLE Python scripts ---
     const htmlOutputs = {}; // Object to store all HTML results
@@ -591,12 +581,11 @@ app.post("/api/generate-full-creative", async (req, res) => {
       let generatedHtml = "";
       try {
         console.log(
-          `🚀 Attempting to generate HTML for ${generator.name} (ID: ${creativeId}, Prompt: "${campaignPrompt}").`
+          `🚀 Attempting to generate HTML for ${generator.name} (ID: ${creativeId}").`
         );
         generatedHtml = await generateHtmlFromPython(
           generator.path, // Pass the specific script path
           creativeId,
-          campaignPrompt
         );
         console.log(
           `✅ HTML generation for ${generator.name} completed successfully.`
