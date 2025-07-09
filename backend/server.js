@@ -8,7 +8,7 @@ const { generateImagesForCreatives, createEnhancedImagePrompt } = require('./ima
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3000;
 
 // --- Environment Variable Checks ---
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY || !process.env.OPENAI_API_KEY) {
@@ -630,16 +630,12 @@ app.post('/api/save', async (req, res) => {
       }
 
       // Step 3: Generate full creative HTML via HTTP request
-      if (generateFullCreative && saveResult.creative && saveResult.creative.creative_id) {
+      if (saveResult.creative && saveResult.creative.creative_id) {
         console.log("🎨 Initiating full creative generation via HTTP request...");
         
         try {
-          // Get the base URL for the API call
-          const baseUrl = process.env.BASE_URL || 
-                         process.env.API_BASE_URL || 
-                         `http://localhost:${process.env.PORT || 3000}`;
-          
-          const fullCreativeApiUrl = `${baseUrl}/api/generate-full-creative`;
+   
+          const fullCreativeApiUrl = `http://localhost:3001/api/generate-full-creative`;
           
           console.log(`📡 Making HTTP request to: ${fullCreativeApiUrl}`);
           console.log(`📋 Request payload: { creative_id: ${saveResult.creative.creative_id} }`);
