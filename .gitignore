@@ -1,7 +1,11 @@
 .DS_Store
 node_modules/
 backend/.env
-Merged Approaches/Merged_Approach-venv
-Merged Approaches/Part-1_Main/package-lock.json
-Merged Approaches/Part-1_Main/package.json
 Merged_Approaches/Part-1_Main/.env
+
+
+venv-full/
+backend/.env
+venv-full/
+
+

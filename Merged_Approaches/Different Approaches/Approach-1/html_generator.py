@@ -1,3 +1,4 @@
+# html_generator.py (Approach-1 - Modified to match Approach-2's data mapping)
 import json
 import os
 import sys
@@ -18,16 +19,13 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") # Ensure this is your service_role key
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    # Changed to stderr
     print("Error: SUPABASE_URL or SUPABASE_KEY environment variables are not set for Supabase client.", file=sys.stderr)
     sys.exit(1)
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    # Changed to stderr
     print("Supabase client initialized.", file=sys.stderr)
 except Exception as e:
-    # Changed to stderr
     print(f"Error initializing Supabase client: {e}", file=sys.stderr)
     sys.exit(1)
 
@@ -37,25 +35,22 @@ FINAL_HTML_NAME = "final_creative_approach1.html"
 FINAL_HTML_PATH = os.path.join(OUTPUT_DIR, FINAL_HTML_NAME)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# -------- Helper Functions (Integrated from your previous code) --------
+# -------- Helper Functions --------
 
 def download_image(image_url, save_path):
     """Downloads an image from a URL and saves it locally.
     Note: This specific function is not directly called in this HTML generation
     logic but is included as it was part of your provided helpers.
     """
-    # Changed to stderr
     print(f"Downloading image from {image_url} to {save_path}...", file=sys.stderr)
     try:
         response = requests.get(image_url)
         response.raise_for_status()
         with open(save_path, 'wb') as f:
             f.write(response.content)
-        # Changed to stderr
         print(f"Image saved to {save_path}", file=sys.stderr)
         return True
     except requests.exceptions.RequestException as e:
-        # Already stderr, keeping for consistency
         print(f"Failed to download image from {image_url}: {e}", file=sys.stderr)
         return False
 
@@ -71,24 +66,19 @@ def get_font_size_px(size_str):
     return size_map.get(size_str.lower(), 30)
 
 def fetch_creative_data_from_supabase(creative_id: str):
-    # Changed to stderr
     print(f"\n--- Fetching creative data for ID: {creative_id} from Supabase ---", file=sys.stderr)
     try:
-        # We are selecting all columns to get the top-level keys
         response = supabase.table('creatives_duplicate').select('*').eq('creative_id', creative_id).single().execute()
         data = response.data
 
         if not data:
-            # Already stderr, keeping for consistency
             print(f"No creative found with ID: {creative_id}", file=sys.stderr)
             raise ValueError(f"Creative ID {creative_id} not found.")
 
-        # Changed to stderr
         print(f"Creative data fetched successfully for ID: {creative_id}", file=sys.stderr)
-        print(f"Raw Supabase creative data: {json.dumps(data, indent=2)}", file=sys.stderr) # Added for debugging
+        print(f"Raw Supabase creative data: {json.dumps(data, indent=2)}", file=sys.stderr)
         return data
     except Exception as e:
-        # Already stderr, keeping for consistency
         print(f"Error in fetching creative data: {e}", file=sys.stderr)
         raise
 
@@ -96,105 +86,184 @@ def fetch_campaign_prompt_from_supabase(campaign_id: str):
     """
     Fetches the campaign_prompt from the 'campaigns_duplicate' table in Supabase.
     """
-    # Changed to stderr
     print(f"\n--- Fetching campaign prompt for ID: {campaign_id} from Supabase ---", file=sys.stderr)
     try:
         response = supabase.table('campaigns_duplicate') \
-                           .select('campaign_prompt') \
-                           .eq('campaign_id', campaign_id) \
-                           .single() \
-                           .execute()
+                            .select('campaign_prompt') \
+                            .eq('campaign_id', campaign_id) \
+                            .single() \
+                            .execute()
 
         data = response.data
 
         if not data:
-            # Already stderr, keeping for consistency
             print(f"No campaign found with ID: {campaign_id}", file=sys.stderr)
             raise ValueError(f"Campaign ID {campaign_id} not found.")
 
-        # Changed to stderr
         print(f"Campaign prompt fetched successfully for ID: {campaign_id}", file=sys.stderr)
         return data.get('campaign_prompt', "")
     except Exception as e:
-        # Already stderr, keeping for consistency
         print(f"Error fetching campaign prompt: {e}", file=sys.stderr)
         raise
 
 def map_supabase_to_required_elements_schema(supabase_creative_data: dict, campaign_prompt: str) -> dict:
-    # Changed to stderr
-    print("\n--- Mapping Supabase data to required_elements schema (Python) ---", file=sys.stderr)
+    """
+    Maps the data fetched from Supabase (where fields are top-level columns)
+    into the 'required_elements' schema that the rest of the Python script understands.
+    This version aligns with Approach-2's mapping logic.
+    """
+    print("\n--- Mapping Supabase data to required_elements schema (Approach-1) ---", file=sys.stderr)
     print(f"Mapping input - supabase_creative_data type: {type(supabase_creative_data)}, value: {json.dumps(supabase_creative_data, indent=2)}", file=sys.stderr)
     print(f"Mapping input - campaign_prompt: {campaign_prompt}", file=sys.stderr)
 
-    # Safely get the 'creative_spec' column, which should contain the entire JSON structure
-    # The server.js code does JSON.parse(JSON.stringify(creative_data))
-    # so Supabase should store it as a proper JSONB object.
-    creative_spec = supabase_creative_data.get("creative_spec")
-
-    if not isinstance(creative_spec, dict):
-        # If 'creative_spec' is not a dictionary, it means it's missing or malformed.
-        # This is a critical error as the rest of the logic expects it.
-        print(f"Error: 'creative_spec' column is missing or not a valid JSON object. Value: {creative_spec}", file=sys.stderr)
-        raise ValueError("Invalid or missing 'creative_spec' in Supabase data.")
-
-    # Now, extract data from within the 'creative_spec' dictionary
-    canvas_data = creative_spec.get("Canvas", {})
-    dimensions = creative_spec.get("dimensions", {"width": 1080, "height": 1920}) # Default to 1080x1920 as per Replicate
-    placement = creative_spec.get("placement", "social_media")
-    format_val = creative_spec.get("format", "static")
-
-    # Helper to safely get nested values with defaults
-    def safe_get_nested(data_dict, keys, default_value):
-        temp = data_dict
-        for key in keys:
-            if isinstance(temp, dict):
-                temp = temp.get(key)
-            else:
+    # Helper to safely get values, assuming they are already parsed JSON if they are objects/arrays
+    def safe_get_field(data_dict, field_name, default_value):
+        value = data_dict.get(field_name)
+        # If it's a string, try to parse it, otherwise return as is or default
+        if isinstance(value, str):
+            try:
+                parsed_value = json.loads(value)
+                return parsed_value if parsed_value is not None else default_value
+            except json.JSONDecodeError:
+                print(f"Warning: Field '{field_name}' is a string but not valid JSON: '{value}'. Using default.", file=sys.stderr)
                 return default_value
-        return temp if temp is not None else default_value
+        return value if value is not None else default_value
 
+    # Initialize with default/fallback values for robustness
     mapped_data = {
-        "campaign_id": supabase_creative_data.get("campaign_id"), # This is a top-level column
-        "campaign_prompt": campaign_prompt, # This comes from the function argument
-        "placement": placement,
-        "dimensions": dimensions,
-        "format": format_val,
+        "campaign_id": supabase_creative_data.get("campaign_id"),
+        "campaign_prompt": campaign_prompt,
+        "placement": safe_get_field(supabase_creative_data, "placement", "social"),
+        "dimensions": safe_get_field(supabase_creative_data, "dimensions", {"width": 1080, "height": 1920}),
+        "format": safe_get_field(supabase_creative_data, "format", "static"),
         "Canvas": {
-            "background": safe_get_nested(canvas_data, ["background"], {"color": "#ffffff", "image": None, "description": ""}),
-            "layout_grid": safe_get_nested(canvas_data, ["layout_grid"], "free"),
-            "bleed_safe_margins": safe_get_nested(canvas_data, ["bleed_safe_margins"], ""),
-            "Imagery": {
-                "background_image_url": safe_get_nested(canvas_data, ["Imagery", "background_image_url"], None)
+            "background": {
+                "type": safe_get_field(supabase_creative_data.get("background", {}), "type", "solid"),
+                "color": safe_get_field(supabase_creative_data.get("background", {}), "color", "#ffffff"),
+                "description": safe_get_field(supabase_creative_data.get("background", {}), "description", ""),
+                "image": None # This will be set from imagery.background_image_url
             },
-            "Text_Blocks": safe_get_nested(canvas_data, ["Text_Blocks"], []),
-            "cta_buttons": safe_get_nested(canvas_data, ["cta_buttons"], []),
-            "brand_logo": safe_get_nested(canvas_data, ["brand_logo"], {
-                "url": None, # Assuming server.js doesn't populate this directly yet
-                "text_alt": "Brand Logo",
-                "size": "medium",
-                "position": "top-left"
-            }),
-            "brand_colors": safe_get_nested(canvas_data, ["brand_colors"], []),
-            "slogans": safe_get_nested(canvas_data, ["slogans"], None),
-            "legal_disclaimer": safe_get_nested(canvas_data, ["legal_disclaimer"], None),
-            "decorative_elements": safe_get_nested(canvas_data, ["decorative_elements"], [])
+            "layout_grid": safe_get_field(supabase_creative_data, "layout_grid", "free"),
+            "bleed_safe_margins": safe_get_field(supabase_creative_data, "bleed_safe_margins", None),
+            "Imagery": {
+                "background_image_url": None # Will be populated below from the 'imagery' array
+            },
+            "Text_Blocks": [], # Will be populated below
+            "cta_buttons": [], # Will be populated below
+            "brand_logo": {}, # Will be populated below
+            "brand_colors": [], # Will be populated below
+            "slogans": None, # Will be populated below
+            "legal_disclaimer": None, # Will be populated below
+            "decorative_elements": [] # Will be populated below
         }
     }
+    print(f"Initial mapped_data Canvas structure: {json.dumps(mapped_data['Canvas'], indent=2)}", file=sys.stderr)
 
-    # Ensure lists are actually lists, handling potential empty string or non-list values from DB
-    if not isinstance(mapped_data["Canvas"]["brand_colors"], list):
-        print(f"Warning: 'brand_colors' was not a list, converting to empty list. Value: {mapped_data['Canvas']['brand_colors']}", file=sys.stderr)
+    # --- Populate Imagery and Background Image URL ---
+    supabase_imagery = safe_get_field(supabase_creative_data, "imagery", [])
+    print(f"Processed imagery (type={type(supabase_imagery)}): {supabase_imagery}", file=sys.stderr)
+    
+    background_image_url = None
+    if isinstance(supabase_imagery, list):
+        for img_data in supabase_imagery:
+            if isinstance(img_data, dict) and img_data.get("type") == "background" and img_data.get("url"):
+                background_image_url = img_data["url"]
+                break
+    
+    if background_image_url:
+        mapped_data["Canvas"]["Imagery"]["background_image_url"] = background_image_url
+        mapped_data["Canvas"]["background"]["image"] = background_image_url # Also assign to canvas background image field
+        print(f"Extracted background_image_url from 'imagery' array: {background_image_url}", file=sys.stderr)
+    else:
+        print("Warning: No 'background' type image URL found in 'imagery' array.", file=sys.stderr)
+
+
+    # Populate Text_Blocks (from 'text_blocks' column)
+    supabase_text_blocks = safe_get_field(supabase_creative_data, "text_blocks", [])
+    print(f"Processed text_blocks (type={type(supabase_text_blocks)}): {supabase_text_blocks}", file=sys.stderr)
+    for block in supabase_text_blocks:
+        if block is not None and isinstance(block, dict):
+            mapped_data["Canvas"]["Text_Blocks"].append({
+                "font": block.get("font_family", "Inter"),
+                "size": block.get("font_size", "medium"),
+                "text": block.get("text", ""),
+                "color": block.get("color", "#000000"),
+                "position": block.get("alignment", "center")
+            })
+        else:
+            print(f"Warning: Skipping invalid Text Block element: {block}", file=sys.stderr)
+
+
+    # Populate CTA Buttons (from 'cta_buttons' column)
+    supabase_cta_buttons = safe_get_field(supabase_creative_data, "cta_buttons", [])
+    print(f"Processed cta_buttons (type={type(supabase_cta_buttons)}): {supabase_cta_buttons}", file=sys.stderr)
+    for cta in supabase_cta_buttons:
+        if cta is not None and isinstance(cta, dict):
+            mapped_data["Canvas"]["cta_buttons"].append({
+                "text": cta.get("text", "Shop Now"),
+                "color": cta.get("text_color", "#ffffff"),
+                "position": "bottom-center", # Default position if not specified elsewhere
+                "background": cta.get("bg_color", "#007bff"),
+                "style": cta.get("style", "primary"), # Assuming style is also needed
+                "url": cta.get("url", "https://example.com") # Assuming URL is also needed
+            })
+        else:
+            print(f"Warning: Skipping invalid CTA button element: {cta}", file=sys.stderr)
+
+
+    # Populate Brand Logo (from 'brand_logo' column)
+    supabase_brand_logo = safe_get_field(supabase_creative_data, "brand_logo", {})
+    print(f"Processed brand_logo (type={type(supabase_brand_logo)}): {supabase_brand_logo}", file=sys.stderr)
+    if isinstance(supabase_brand_logo, dict):
+        mapped_data["Canvas"]["brand_logo"] = {
+            "url": supabase_brand_logo.get("url", None),
+            "text_alt": supabase_brand_logo.get("text_alt", "Brand Logo"),
+            "size": "medium", # Default, server.js doesn't specify size here
+            "position": "top-left" # Default
+        }
+    else:
+        print(f"Warning: Unexpected type for brand_logo: {type(supabase_brand_logo)}. Using default.", file=sys.stderr)
+        mapped_data["Canvas"]["brand_logo"] = {
+            "url": None, "text_alt": "Brand Logo", "size": "medium", "position": "top-left"
+        }
+
+    # Populate Brand Colors (from 'brand_colors' column)
+    supabase_brand_colors = safe_get_field(supabase_creative_data, "brand_colors", [])
+    print(f"Processed brand_colors (type={type(supabase_brand_colors)}): {supabase_brand_colors}", file=sys.stderr)
+    if isinstance(supabase_brand_colors, list):
+        mapped_data["Canvas"]["brand_colors"] = supabase_brand_colors
+    else:
+        print(f"Warning: Unexpected type for brand_colors: {type(supabase_brand_colors)}. Setting to empty list.", file=sys.stderr)
         mapped_data["Canvas"]["brand_colors"] = []
 
-    if not isinstance(mapped_data["Canvas"]["decorative_elements"], list):
-        print(f"Warning: 'decorative_elements' was not a list, converting to empty list. Value: {mapped_data['Canvas']['decorative_elements']}", file=sys.stderr)
-        mapped_data["Canvas"]["decorative_elements"] = []
-    # This check is less critical now if safe_get_nested correctly defaults to [], but good for robustness
-    if mapped_data["Canvas"]["decorative_elements"] == "" or mapped_data["Canvas"]["decorative_elements"] is None:
+
+    # Populate Slogan (from 'slogan' column)
+    mapped_data["Canvas"]["slogans"] = safe_get_field(supabase_creative_data, "slogan", None)
+    print(f"Processed slogans: {mapped_data['Canvas']['slogans']}", file=sys.stderr)
+
+    # Populate Legal Disclaimer (from 'legal_disclaimer' column)
+    mapped_data["Canvas"]["legal_disclaimer"] = safe_get_field(supabase_creative_data, "legal_disclaimer", None)
+    print(f"Processed legal_disclaimer: {mapped_data['Canvas']['legal_disclaimer']}", file=sys.stderr)
+
+
+    # Populate Decorative Elements (from 'decorative_elements' column)
+    supabase_decorative_elements = safe_get_field(supabase_creative_data, "decorative_elements", [])
+    print(f"Processed decorative_elements (type={type(supabase_decorative_elements)}): {supabase_decorative_elements}", file=sys.stderr)
+    if isinstance(supabase_decorative_elements, list):
+        for element in supabase_decorative_elements:
+            if element is not None and isinstance(element, dict):
+                mapped_data["Canvas"]["decorative_elements"].append({
+                    "shape_type": element.get("shape_type", "none"),
+                    "color": element.get("color", "#cccccc"),
+                    "animation": element.get("animation", "subtle") # Get animation if present, default to subtle
+                })
+            else:
+                print(f"Warning: Skipping invalid decorative element: {element}", file=sys.stderr)
+    else:
+        print(f"Warning: Unexpected type for decorative_elements: {type(supabase_decorative_elements)}. Setting to empty list.", file=sys.stderr)
         mapped_data["Canvas"]["decorative_elements"] = []
 
-    # Changed to stderr
-    print("Mapped schema (Python):", json.dumps(mapped_data, indent=2), file=sys.stderr)
+    print("Mapped schema (Approach-1):", json.dumps(mapped_data, indent=2), file=sys.stderr)
     return {"required_elements": mapped_data}
 
 # -------- Main Function for Approach-1 HTML Generation --------
@@ -222,11 +291,9 @@ def main():
             try:
                 # Fetch the *actual* campaign_prompt from the campaigns_duplicate table
                 campaign_prompt_from_db = fetch_campaign_prompt_from_supabase(campaign_id_from_creative)
-                # Changed to stderr
                 print(f"Fetched campaign_prompt from DB: '{campaign_prompt_from_db}'", file=sys.stderr)
                 campaign_prompt_final = campaign_prompt_from_db
             except Exception as e:
-                # Already stderr, keeping for consistency
                 print(f"Warning: Could not fetch campaign prompt from DB for campaign_id {campaign_id_from_creative}: {e}. Using CLI prompt.", file=sys.stderr)
                 # campaign_prompt_final remains args.campaign_prompt_cli
 
@@ -291,31 +358,23 @@ and texts. Ensure it looks like a polished marketing ad.
         final_html = response_text[0]
 
         # -------- Save output and Print to stdout --------
-        # Still saving to file for local access/debugging
         with open(FINAL_HTML_PATH, "w", encoding="utf-8") as f:
             f.write(final_html)
 
-        # Changed to stderr
         print(f"\n Final HTML ad saved to {FINAL_HTML_PATH}", file=sys.stderr)
-        # Changed to stderr
         print(f"You can open it in your browser: file://{os.path.abspath(FINAL_HTML_PATH)}", file=sys.stderr)
 
         # IMPORTANT: Output the HTML content to stdout so Node.js can capture it
-        # Removed the header, only print the HTML
         print(final_html)
 
     except FileNotFoundError as e:
-        # Already stderr, keeping for consistency
         print(f"Error: {e}. Please ensure all required files and directories exist.", file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
-        # Already stderr, keeping for consistency
         print(f"Data Error: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        # Already stderr, keeping for consistency
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
-        # Added traceback for better debugging
         import traceback
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)

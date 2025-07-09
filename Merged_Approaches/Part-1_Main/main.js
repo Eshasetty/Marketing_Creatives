@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 const { spawn } = require("child_process");
-const path = require("path");
+const path = require("path"); // Make sure 'path' is imported
 const fetch = require("node-fetch"); // Ensure node-fetch is imported if not using Node 18+ native fetch
 
 // Load environment variables
@@ -14,10 +14,7 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // --- Environment Variable Checks ---
-if (
-  !process.env.SUPABASE_URL ||
-  !process.env.SUPABASE_KEY
-) {
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
   console.error(
     "❌ Missing essential environment variables (SUPABASE_URL, SUPABASE_KEY)."
   );
@@ -57,6 +54,8 @@ const htmlGenerators = [
 // The generateHtmlFromPython function only needs creativeId and campaignPrompt
 async function generateHtmlFromPython(scriptPath, creativeId, campaignPrompt) {
   return new Promise((resolve, reject) => {
+    // It's good practice to ensure 'python' is in the system's PATH,
+    // or provide the full path to the Python executable if it's not.
     const pythonExecutable = "python";
 
     console.log(
@@ -112,7 +111,9 @@ app.post("/api/generate-full-creative", async (req, res) => {
   const { creative_id } = req.body;
 
   if (!creative_id) {
-    return res.status(400).json({ error: "creative_id is required in the request body." });
+    return res
+      .status(400)
+      .json({ error: "creative_id is required in the request body." });
   }
 
   try {
@@ -124,8 +125,13 @@ app.post("/api/generate-full-creative", async (req, res) => {
       .single();
 
     if (creativeError || !creativeData) {
-      console.error(`❌ Error fetching creative with ID ${creative_id}:`, creativeError?.message || "Not found");
-      return res.status(404).json({ error: `Creative with ID ${creative_id} not found.` });
+      console.error(
+        `❌ Error fetching creative with ID ${creative_id}:`,
+        creativeError?.message || "Not found"
+      );
+      return res
+        .status(404)
+        .json({ error: `Creative with ID ${creative_id} not found.` });
     }
 
     const campaign_id = creativeData.campaign_id; // Retrieve campaign_id
@@ -134,11 +140,19 @@ app.post("/api/generate-full-creative", async (req, res) => {
     const campaignPrompt = await getCampaignPromptFromDb(campaign_id);
 
     if (!campaignPrompt) {
-      console.error(`❌ Campaign prompt not found for campaign ID ${campaign_id}`);
-      return res.status(404).json({ error: `Campaign prompt not found for campaign ID ${campaign_id}.` });
+      console.error(
+        `❌ Campaign prompt not found for campaign ID ${campaign_id}`
+      );
+      return res
+        .status(404)
+        .json({
+          error: `Campaign prompt not found for campaign ID ${campaign_id}.`,
+        });
     }
 
-    console.log(`✅ Retrieved creative_id: ${creative_id}, campaign_id: ${campaign_id}, campaign_prompt: "${campaignPrompt}"`);
+    console.log(
+      `✅ Retrieved creative_id: ${creative_id}, campaign_id: ${campaign_id}, campaign_prompt: "${campaignPrompt}"`
+    );
 
     // --- Step: Generate HTML using MULTIPLE Python scripts ---
     const htmlOutputs = {}; // Object to store all HTML results
@@ -163,7 +177,7 @@ app.post("/api/generate-full-creative", async (req, res) => {
           `❌ HTML generation for ${generator.name} failed:`,
           htmlError.message
         );
-        generatedHtml = "";
+        generatedHtml = ""; // Ensure it's an empty string on failure
       }
       return { key: generator.outputKey, html: generatedHtml };
     });
@@ -182,7 +196,9 @@ app.post("/api/generate-full-creative", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error in /api/generate-full-creative endpoint:", error);
-    res.status(500).json({ error: "Internal server error during creative generation." });
+    res
+      .status(500)
+      .json({ error: "Internal server error during creative generation." });
   }
 });
 
