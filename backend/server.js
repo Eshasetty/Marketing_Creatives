@@ -8,7 +8,7 @@ const { generateImagesForCreatives, createEnhancedImagePrompt } = require('./ima
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 4000;
 
 // --- Environment Variable Checks ---
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY || !process.env.OPENAI_API_KEY) {

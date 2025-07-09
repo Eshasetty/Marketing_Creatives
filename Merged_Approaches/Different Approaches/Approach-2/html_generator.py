@@ -8,6 +8,7 @@ import easyocr
 from dotenv import load_dotenv
 import sys
 from supabase import create_client, Client
+import io # Added for in-memory image handling if needed, though mostly URLs are used
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,17 +28,10 @@ except Exception as e:
     print(f"Error initializing Supabase client: {e}", file=sys.stderr)
     sys.exit(1)
 
-# --- Configuration for file paths ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'output')
-FULL_CREATIVE_IMAGE_NAME = "full_creative.jpg"
-CLEAN_BACKGROUND_IMAGE_NAME = "clean_background.jpg" # Still kept for path, but not used for generation
-FINAL_HTML_NAME = "final_creative.html"
-
-FULL_CREATIVE_IMAGE_PATH = os.path.join(OUTPUT_DIR, FULL_CREATIVE_IMAGE_NAME)
-CLEAN_BACKGROUND_IMAGE_PATH = os.path.join(OUTPUT_DIR, CLEAN_BACKGROUND_IMAGE_NAME)
-FINAL_HTML_PATH = os.path.join(OUTPUT_DIR, FINAL_HTML_NAME)
-
-REPLICATE_MODEL = "black-forest-labs/flux-kontext-pro"
+# --- Configuration for file paths (REMOVED LOCAL FILE PATHS) ---
+# OUTPUT_DIR and specific image/HTML paths are no longer needed for local saving.
+# Kept for compatibility if some utility functions still reference it for temporary debug or if a path is needed
+# for cv2.imread for OCR, but the files themselves are not persisted.
 
 # Initialize EasyOCR reader globally
 try:
@@ -49,23 +43,23 @@ except Exception as e:
     print("Please ensure necessary EasyOCR dependencies are met, or try running 'pip install easyocr'", file=sys.stderr)
     sys.exit(1)
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# REPLICATE_MODEL remains
+REPLICATE_MODEL = "black-forest-labs/flux-kontext-pro"
 
 # --- Helper Functions ---
 
-def download_image(image_url, save_path):
-    """Downloads an image from a URL and saves it locally."""
-    print(f"Downloading image from {image_url} to {save_path}...", file=sys.stderr)
+def download_image_to_memory(image_url):
+    """Downloads an image from a URL and returns it as a bytes object."""
+    print(f"Downloading image from {image_url} to memory for OCR processing...", file=sys.stderr)
     try:
         response = requests.get(image_url)
         response.raise_for_status()
-        with open(save_path, 'wb') as f:
-            f.write(response.content)
-        print(f"Image saved to {save_path}", file=sys.stderr)
-        return True
+        print(f"Image downloaded from {image_url}", file=sys.stderr)
+        return io.BytesIO(response.content)
     except requests.exceptions.RequestException as e:
         print(f"Failed to download image from {image_url}: {e}", file=sys.stderr)
-        return False
+        return None
+
 
 def get_font_size_px(size_str):
     """Converts a descriptive font size string to an approximate pixel value."""
@@ -103,10 +97,10 @@ def fetch_campaign_prompt_from_supabase(campaign_id: str):
     print(f"\n--- Fetching campaign prompt for ID: {campaign_id} from Supabase ---", file=sys.stderr)
     try:
         response = supabase.table('campaigns_duplicate') \
-                           .select('campaign_prompt') \
-                           .eq('campaign_id', campaign_id) \
-                           .single() \
-                           .execute()
+                            .select('campaign_prompt') \
+                            .eq('campaign_id', campaign_id) \
+                            .single() \
+                            .execute()
 
         data = response.data
 
@@ -293,7 +287,7 @@ def map_supabase_to_required_elements_schema(supabase_creative_data: dict, campa
 def generate_full_creative(replicate_client, creative_data):
     """
     Generates the initial full creative image with all elements using a Replicate model.
-    This image will then be used for OCR to determine text positions.
+    This function will now *return the URL* of the generated image, instead of downloading it.
     """
     print("\n--- Phase 1: Generating Full Creative Image with AI ---", file=sys.stderr)
     print(f"Input creative_data for Replicate generation: {json.dumps(creative_data, indent=2)}", file=sys.stderr)
@@ -333,15 +327,6 @@ def generate_full_creative(replicate_client, creative_data):
     print(f"Text_Blocks for Replicate: {text_blocks}", file=sys.stderr)
     for block in text_blocks:
         processed_text = block.get("text", "")
-        # Use a more robust check for sensitive terms if necessary
-        # The prompt for Replicate should use actual text for better generation,
-        # but if brand names are truly sensitive for generation, you can filter here.
-        # For actual display in HTML, you'd use the original text.
-        # sensitive_terms = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
-        # if any(term.lower() in processed_text.lower() for term in sensitive_terms):
-        #    print(f"Warning: Potentially sensitive term '{processed_text}' detected in Text Block. Generalizing for AI prompt.", file=sys.stderr)
-        #    processed_text = "Apparel Brand Name"
-
         texts_for_replicate.append({
             "text": block.get("text", ""), # Use original text for Replicate
             "font_size": get_font_size_px(block.get("size", "medium")),
@@ -358,11 +343,6 @@ def generate_full_creative(replicate_client, creative_data):
 
     for cta in cta_buttons:
         processed_cta_text = cta.get("text", "")
-        # sensitive_terms = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
-        # if any(term.lower() in processed_cta_text.lower() for term in sensitive_terms):
-        #    print(f"Warning: Potentially sensitive term '{processed_cta_text}' detected in CTA. Generalizing for AI prompt.", file=sys.stderr)
-        #    processed_cta_text = "Shop Now"
-
         texts_for_replicate.append({
             "text": cta.get("text", ""), # Use original text for Replicate
             "font_size": get_font_size_px("large"),
@@ -377,26 +357,16 @@ def generate_full_creative(replicate_client, creative_data):
 
 
     if brand_logo_url and isinstance(brand_logo_url, str) and brand_logo_url.startswith("http"):
-        # If the model supports directly integrating images via URL in 'image_overrides' etc.
-        # This current model (flux-kontext-pro) seems to use 'image' for background.
-        # For actual logo placement, you might need a different approach or model.
-        # For now, let's just add it to prompt and rely on text for now for flux-kontext-pro
         main_prompt += f"Integrate a brand logo image visually similar to the one at {brand_logo_url} at {brand_logo_info.get('position', 'top-left')} with {brand_logo_info.get('size', 'medium')} size. "
         print(f"Note: Model '{REPLICATE_MODEL}' interprets logo URL from prompt. Direct logo input not available in current 'image' field.", file=sys.stderr)
     elif brand_logo_text_alt:
         processed_brand_name = brand_logo_text_alt
-        # sensitive_brands = ["Hollister", "Gilly Hicks", "Abercrombie", "Nike", "Adidas"]
-        # if any(brand.lower() in brand_logo_text_alt.lower() for brand in sensitive_brands):
-        #    print(f"Warning: Potentially sensitive brand name '{brand_logo_text_alt}' detected. Generalizing for AI prompt.", file=sys.stderr)
-        #    processed_brand_name = "Generic Apparel Brand"
-
         texts_for_replicate.append({
             "text": brand_logo_text_alt, # Use original text for Replicate
             "font_size": get_font_size_px(brand_logo_info.get("size", "medium")),
             "position": brand_logo_info.get("position", "top-left")
         })
         main_prompt += f"Include brand logo text: '{brand_logo_text_alt}' at {brand_logo_info.get('position', 'top-left')}. "
-    # Removed the 'logos' key handling as it's not present in the server.js output for brand_logo
 
 
     slogans = canvas_data.get("slogans")
@@ -424,7 +394,6 @@ def generate_full_creative(replicate_client, creative_data):
         for element in decorative_elements_raw:
             if element is not None and isinstance(element, dict):
                 main_prompt += f"Add a {element.get('shape_type', 'geometric')} decorative element with color {element.get('color', '')} and {element.get('animation', 'subtle')} animation. "
-    # Removed the empty string check as list handling should cover it.
     else:
         print(f"Warning: Unexpected type for decorative_elements: {type(decorative_elements_raw)}. Skipping.", file=sys.stderr)
     print(f"Decorative Elements for Replicate: {decorative_elements_raw}", file=sys.stderr)
@@ -443,13 +412,11 @@ def generate_full_creative(replicate_client, creative_data):
         replicate_output_object = replicate_client.run(REPLICATE_MODEL, input=replicate_input)
         print(f"replicate_client.run() returned: {replicate_output_object}", file=sys.stderr)
         
-        # Check if the returned object is None or if it doesn't have the 'url' attribute
         if replicate_output_object is None or not hasattr(replicate_output_object, 'url'):
             raise Exception(f"Replicate model '{REPLICATE_MODEL}' did not return a valid output object with a 'url' attribute. Received: {replicate_output_object}")
         
         output_url = replicate_output_object.url
         
-        # Existing check for output_url being None (or empty string)
         if not output_url:
             raise Exception(f"Replicate model '{REPLICATE_MODEL}' returned an empty image URL.")
     except Exception as e:
@@ -458,75 +425,33 @@ def generate_full_creative(replicate_client, creative_data):
 
     print(f"Replicate returned full creative image URL: {output_url}", file=sys.stderr)
 
-    if not download_image(output_url, FULL_CREATIVE_IMAGE_PATH):
-        raise Exception("Failed to download full creative image.")
-
     return output_url
-
-# ------------------------------------------------------
-# Phase 2: Generate Clean Background Image (NO LONGER USED) - kept for context
-# ------------------------------------------------------
-# This function is removed from the main workflow as per your request.
-# The REPLICATE_TEXT_REMOVAL_MODEL is also no longer listed in the script.
-# def generate_clean_background(replicate_client, full_creative_image_url, creative_data):
-#     """
-#     Generates a clean background image by re-prompting the model to remove text/branding.
-#     """
-#     print("\n--- Phase 2: Generating Clean Background Image ---", file=sys.stderr)
-#     canvas_data = creative_data.get("Canvas", {})
-#     dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1080})
-
-#     clean_prompt = (
-#         "remove all text from the image. "
-#     )
-
-#     clean_replicate_input = {
-#         "input_image": full_creative_image_url,
-#         "prompt": clean_prompt,
-#         "width": dimensions.get("width", 1080),
-#         "height": dimensions.get("height", 1080),
-#     }
-
-#     print("\n--- Replicate Model Input (Clean Background) ---", file=sys.stderr)
-#     print(f"Model: {REPLICATE_TEXT_REMOVAL_MODEL}", file=sys.stderr)
-#     print(f"Input Payload: {json.dumps(clean_replicate_input, indent=2)}", file=sys.stderr)
-#     print("-------------------------------------------------\n", file=sys.stderr)
-
-#     try:
-#         replicate_output_object = replicate_client.run(REPLICATE_TEXT_REMOVAL_MODEL, input=clean_replicate_input)
-#         clean_background_url = replicate_output_object.url
-#     except Exception as e:
-#         print(f"Error calling Replicate model '{REPLICATE_TEXT_REMOVAL_MODEL}': {e}", file=sys.stderr)
-#         raise
-
-#     print(f"Replicate returned clean background image URL: {clean_background_url}", file=sys.stderr)
-
-#     if not download_image(clean_background_url, CLEAN_BACKGROUND_IMAGE_PATH):
-#         raise Exception("Failed to download clean background image.")
-
-#     return clean_background_url
 
 # ------------------------------------------------------
 # Phase 3: Extract Text Positions using EasyOCR
 # ------------------------------------------------------
-def extract_text_positions(image_path):
+def extract_text_positions(image_bytes_io):
     """
-    Extracts text and their bounding box positions from an image using EasyOCR,
-    and visualizes these bounding boxes on a debug image.
+    Extracts text and their bounding box positions from an image provided as bytes (in-memory)
+    using EasyOCR. Debug image saving is removed.
     """
-    print(f"\n--- Phase 3: Extracting text positions with EasyOCR from {image_path} ---", file=sys.stderr)
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"Error: Could not load image at {image_path} for OCR. Ensure it was downloaded correctly.", file=sys.stderr)
-        raise FileNotFoundError(f"Could not load image at {image_path} for OCR.")
+    print(f"\n--- Phase 3: Extracting text positions with EasyOCR from in-memory image ---", file=sys.stderr)
+    
+    # Read the image from bytes in memory
+    file_bytes = image_bytes_io.read()
+    np_array = np.frombuffer(file_bytes, np.uint8)
+    img = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
 
-    print(f"Image loaded for OCR: {image_path}", file=sys.stderr)
+    if img is None:
+        print(f"Error: Could not decode image from in-memory buffer for OCR.", file=sys.stderr)
+        raise ValueError(f"Could not decode image from in-memory buffer for OCR.")
+
+    print(f"Image loaded into memory for OCR.", file=sys.stderr)
     results = reader.readtext(img)
     print(f"Raw EasyOCR results: {results}", file=sys.stderr)
 
-
     ocr_boxes = []
-    debug_img = img.copy()
+    # debug_img = img.copy() # Debug image saving removed
 
     for (bbox, text, conf) in results:
         x_coords = [p[0] for p in bbox]
@@ -547,15 +472,15 @@ def extract_text_positions(image_path):
                 'conf': conf
             })
 
-            cv2.rectangle(debug_img, (x, y), (x + width, y + height), (0, 255, 0), 2)
-            cv2.putText(debug_img, f"{text.strip()} ({conf:.2f})", (x, y - 5),
-                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+            # cv2.rectangle(debug_img, (x, y), (x + width, y + height), (0, 255, 0), 2) # Debug image saving removed
+            # cv2.putText(debug_img, f"{text.strip()} ({conf:.2f})", (x, y - 5), # Debug image saving removed
+            #                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA) # Debug image saving removed
 
     ocr_boxes.sort(key=lambda b: (b['y'], b['x']))
 
-    debug_output_path = os.path.join(OUTPUT_DIR, "easyocr_debug_image.jpg")
-    cv2.imwrite(debug_output_path, debug_img)
-    print(f"EasyOCR debug image with bounding boxes saved to {debug_output_path}", file=sys.stderr)
+    # debug_output_path = os.path.join(OUTPUT_DIR, "easyocr_debug_image.jpg") # Debug image saving removed
+    # cv2.imwrite(debug_output_path, debug_img) # Debug image saving removed
+    # print(f"EasyOCR debug image with bounding boxes saved to {debug_output_path}", file=sys.stderr) # Debug image saving removed
 
     print("Detected text elements (from EasyOCR):", ocr_boxes, file=sys.stderr)
     if not ocr_boxes:
@@ -565,35 +490,47 @@ def extract_text_positions(image_path):
 # ------------------------------------------------------
 # Phase 4: Generate HTML with Original Background and OCR Text Positions
 # ------------------------------------------------------
-def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: list, creative_data: dict):
+def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: list, creative_data: dict, full_creative_image_url: str):
     """
-    Generates the final HTML creative using the background URL gathered from Supabase
-    and OCR-detected text positions. It verifies the actual dimensions
-    of the generated image to ensure the HTML container matches.
+    Generates the final HTML creative as a string.
+    It uses the background URL gathered from Supabase and OCR-detected text positions.
+    It fetches the dimensions of the AI-generated image directly from its URL.
     """
     print("\n--- Phase 4: Generating Final HTML ---", file=sys.stderr)
     print(f"HTML generation input - final_html_background_url: {final_html_background_url}", file=sys.stderr)
     print(f"HTML generation input - ocr_boxes: {ocr_boxes}", file=sys.stderr)
     print(f"HTML generation input - creative_data dimensions: {creative_data.get('dimensions')}", file=sys.stderr)
+    print(f"HTML generation input - full_creative_image_url (for dimensions): {full_creative_image_url}", file=sys.stderr)
 
 
     requested_dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1920})
     requested_width = requested_dimensions.get("width", 1080)
     requested_height = requested_dimensions.get("height", 1920)
 
-    # Use the full creative image that was generated by Replicate for dimension verification
-    actual_img = cv2.imread(FULL_CREATIVE_IMAGE_PATH)
-    if actual_img is None:
-        print(f"Warning: Could not load the generated image at {FULL_CREATIVE_IMAGE_PATH} to verify dimensions. Using requested dimensions for HTML.", file=sys.stderr)
-        actual_creative_height = requested_height
-        actual_creative_width = requested_width
-    else:
-        actual_creative_height, actual_creative_width, _ = actual_img.shape
-        print(f"Requested creative dimensions (from JSON): {requested_width}x{requested_height}px", file=sys.stderr)
-        print(f"Actual AI-generated image dimensions (from {FULL_CREATIVE_IMAGE_NAME}): {actual_creative_width}x{actual_creative_height}px", file=sys.stderr)
+    actual_creative_width = requested_width
+    actual_creative_height = requested_height
 
-        if actual_creative_width != requested_width or actual_creative_height != requested_height:
-            print(f"Dimension Mismatch: AI generated image ({actual_creative_width}x{actual_creative_height}) differs from requested ({requested_width}x{requested_height}). HTML container will use actual dimensions.", file=sys.stderr)
+    # Attempt to get actual dimensions of the AI-generated image from its URL
+    try:
+        if full_creative_image_url:
+            print(f"Fetching dimensions from AI-generated image URL: {full_creative_image_url}", file=sys.stderr)
+            image_data = download_image_to_memory(full_creative_image_url)
+            if image_data:
+                # Read the image from bytes in memory to get dimensions
+                np_array = np.frombuffer(image_data.getvalue(), np.uint8)
+                img = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+                if img is not None:
+                    actual_creative_height, actual_creative_width, _ = img.shape
+                    print(f"Actual AI-generated image dimensions (from URL): {actual_creative_width}x{actual_creative_height}px", file=sys.stderr)
+                else:
+                    print(f"Warning: Could not decode AI-generated image from URL to verify dimensions. Using requested dimensions.", file=sys.stderr)
+            else:
+                print(f"Warning: Failed to download AI-generated image from URL to verify dimensions. Using requested dimensions.", file=sys.stderr)
+        else:
+            print("Warning: No full creative image URL provided for dimension verification. Using requested dimensions.", file=sys.stderr)
+    except Exception as e:
+        print(f"Error while fetching AI-generated image dimensions: {e}. Using requested dimensions.", file=sys.stderr)
+
 
     creative_width = actual_creative_width
     creative_height = actual_creative_height
@@ -602,8 +539,7 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
         print("Warning: background_image_url not found in JSON. HTML background will be empty.", file=sys.stderr)
         final_html_background_url = "" # Ensure it's an empty string if None
 
-    with open(FINAL_HTML_PATH, 'w') as f:
-        f.write(f"""<!DOCTYPE html>
+    html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>Marketing Creative</title>
@@ -658,40 +594,41 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
 <body>
     <div class="creative-container">
         <img class="creative-image" src="{final_html_background_url}" alt="Creative Background">
-""")
-        for box in ocr_boxes:
-            text_content = box['text']
+"""
+    for box in ocr_boxes:
+        text_content = box['text']
 
-            base_font_size = box['height'] * 0.9
-            estimated_chars_per_line = box['width'] / (base_font_size * 0.6) if (base_font_size * 0.6) > 0 else len(text_content)
+        base_font_size = box['height'] * 0.9
+        estimated_chars_per_line = box['width'] / (base_font_size * 0.6) if (base_font_size * 0.6) > 0 else len(text_content)
 
-            if len(text_content) > estimated_chars_per_line * 1.2 and estimated_chars_per_line > 0:
-                scaling_factor = box['width'] / (len(text_content) * base_font_size * 0.6) if (len(text_content) * base_font_size * 0.6) > 0 else 1
-                font_size = base_font_size * scaling_factor * 0.9
-            else:
-                font_size = base_font_size
+        if len(text_content) > estimated_chars_per_line * 1.2 and estimated_chars_per_line > 0:
+            scaling_factor = box['width'] / (len(text_content) * base_font_size * 0.6) if (len(text_content) * base_font_size * 0.6) > 0 else 1
+            font_size = base_font_size * scaling_factor * 0.9
+        else:
+            font_size = base_font_size
 
-            font_size = max(10, min(80, font_size))
+        font_size = max(10, min(80, font_size))
 
-            html_box_buffer_x = 10
-            html_box_buffer_y = 8
+        html_box_buffer_x = 10
+        html_box_buffer_y = 8
 
-            left_pos = max(0, box['x'] - (html_box_buffer_x // 2))
-            top_pos = max(0, box['y'] - (html_box_buffer_y // 2))
+        left_pos = max(0, box['x'] - (html_box_buffer_x // 2))
+        top_pos = max(0, box['y'] - (html_box_buffer_y // 2))
 
-            width_val = max(20, box['width'] + html_box_buffer_x)
-            height_val = max(20, box['height'] + html_box_buffer_y)
+        width_val = max(20, box['width'] + html_box_buffer_x)
+        height_val = max(20, box['height'] + html_box_buffer_y)
 
-            width_val = min(width_val, creative_width - left_pos)
-            height_val = min(height_val, creative_height - top_pos)
+        width_val = min(width_val, creative_width - left_pos)
+        height_val = min(height_val, creative_height - top_pos)
 
-            style = (f"left: {left_pos}px; top: {top_pos}px; "
-                     f"width: {width_val}px; height: {height_val}px; "
-                     f"font-size: {font_size}px;")
-            f.write(f"""        <div class="overlay-text" style="{style}" data-x="{box['x']}" data-y="{box['y']}">{text_content}</div>\n""")
+        style = (f"left: {left_pos}px; top: {top_pos}px; "
+                 f"width: {width_val}px; height: {height_val}px; "
+                 f"font-size: {font_size}px;")
+        html_content += f"""         <div class="overlay-text" style="{style}" data-x="{box['x']}" data-y="{box['y']}">{text_content}</div>\n"""
 
-        f.write("""    </div>\n</body>\n</html>""")
-    print(f"Generated HTML saved to {FINAL_HTML_PATH}", file=sys.stderr)
+    html_content += """    </div>\n</body>\n</html>"""
+    print("Generated HTML content string.", file=sys.stderr)
+    return html_content
 
 # ------------------------------------------------------
 # Main Orchestration Process
@@ -706,8 +643,8 @@ def main():
         replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN)
         print("Replicate client initialized.", file=sys.stderr)
 
-        # Expect creative_id as command-line argument. campaign_prompt will be fetched.
-        if len(sys.argv) < 3: # Changed from <2 to <3 to expect campaign_prompt from CLI
+        # Expect creative_id and campaign_prompt as command-line argument.
+        if len(sys.argv) < 3:
             print("Usage: python creative_html_generator3.py <creative_id> <campaign_prompt>", file=sys.stderr)
             sys.exit(1)
 
@@ -767,32 +704,30 @@ def main():
         print(f"Completed Phase 1. full_creative_url: {full_creative_url}", file=sys.stderr)
 
 
-        # --- MODIFIED: REMOVED PHASE 2 (CLEAN BACKGROUND GENERATION) ---
-        # As per your request, we are no longer generating a clean background image.
-        # The HTML will use the original background_image_url from Supabase.
-        # clean_background_url = generate_clean_background(replicate_client, full_creative_url, creative_data_for_processing["required_elements"])
-        # ---------------------------------------------------------------
+        # Download the full creative image to memory for OCR processing
+        print("Downloading full creative image to memory for OCR.", file=sys.stderr)
+        full_creative_image_bytes = download_image_to_memory(full_creative_url)
+        if not full_creative_image_bytes:
+            raise Exception("Failed to download full creative image to memory for OCR.")
+        print("Full creative image downloaded to memory.", file=sys.stderr)
 
-        # Phase 3: Extract text positions from the FULL creative image using EasyOCR
+        # Phase 3: Extract text positions from the FULL creative image (from memory) using EasyOCR
         print("Starting Phase 3: Extract text positions using EasyOCR.", file=sys.stderr)
-        ocr_boxes = extract_text_positions(FULL_CREATIVE_IMAGE_PATH)
+        ocr_boxes = extract_text_positions(full_creative_image_bytes)
         print(f"Completed Phase 3. Number of OCR boxes: {len(ocr_boxes)}", file=sys.stderr)
 
 
         # Phase 4: Generate HTML with the ORIGINAL background image URL and OCR positions
         print("Starting Phase 4: Generate HTML.", file=sys.stderr)
-        generate_html_with_ocr_layout(background_image_url_for_html, ocr_boxes, creative_data_for_processing["required_elements"])
+        html_content = generate_html_with_ocr_layout(background_image_url_for_html, ocr_boxes, creative_data_for_processing["required_elements"], full_creative_url)
         print("Completed Phase 4. HTML generation finished.", file=sys.stderr)
 
 
         print("\n✅ Multi-stage creative generation pipeline completed successfully!", file=sys.stderr)
-        print(f"Check {OUTPUT_DIR} for '{FULL_CREATIVE_IMAGE_NAME}', 'easyocr_debug_image.jpg', and '{FINAL_HTML_NAME}'.", file=sys.stderr)
 
         # IMPORTANT: Output the HTML content to stdout so Node.js can capture it
-        with open(FINAL_HTML_PATH, 'r') as f:
-            html_content = f.read()
-            print("\n--- Generated HTML Content ---", file=sys.stderr)
-            print(html_content) # Print to stdout for Node.js to capture
+        print("\n--- Generated HTML Content ---", file=sys.stderr)
+        print(html_content) # Print to stdout for Node.js to capture
 
     except FileNotFoundError as e:
         print(f"Error: {e}. Please ensure all required files and directories exist.", file=sys.stderr)
@@ -809,4 +744,6 @@ def main():
 
 # Run the main function
 if __name__ == "__main__":
+    # Import numpy here as it's only needed for cv2.imdecode
+    import numpy as np
     main()
