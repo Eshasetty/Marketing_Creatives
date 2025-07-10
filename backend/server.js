@@ -375,6 +375,7 @@ async function saveCampaignPromptAndCreatives(prompt, aiText) {
 // --- API Endpoints ---
 app.post("/api/previous-creatives", async (req, res) => {
   try {
+    console.log("➡️ Request to fetch previous creatives' imagery URLs.");
     const { data, error } = await supabase
       .from("creatives_duplicate")
       .select("imagery");
