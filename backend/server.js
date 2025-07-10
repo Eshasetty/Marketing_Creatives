@@ -741,22 +741,21 @@ function parseStructuredAIText(aiText) {
     
     // Enhanced helper to parse structured fields
     const parseStructuredField = (lines, sectionName, fieldName) => {
-        const sectionIndex = lines.findIndex(l => l.toLowerCase().includes(sectionName.toLowerCase() + ":"));
+        // Find the section header, with or without a colon
+        const sectionIndex = lines.findIndex(l => {
+            const normalized = l.toLowerCase().replace(/:$/, '').trim();
+            return normalized === sectionName.toLowerCase();
+        });
         if (sectionIndex === -1) return null;
-        
+
         // Look for the field within the next few lines after the section
         for (let i = sectionIndex + 1; i < Math.min(sectionIndex + 10, lines.length); i++) {
             const line = lines[i].toLowerCase();
             if (line.startsWith(fieldName.toLowerCase() + ":")) {
                 return lines[i].split(":").slice(1).join(":").trim();
             }
-            // Stop if we hit another section
-            if (line.includes(":") && !line.startsWith(fieldName.toLowerCase())) {
-                const nextSection = ["title:", "subtitle", "slogan:", "legal disclaimer:", "cta:", "background:", "branding:", "layout:", "decorative element:"];
-                if (nextSection.some(section => line.includes(section))) {
-                    break;
-                }
-            }
+            // Stop if we hit another section header (with or without colon)
+            if (/^[a-z ]+:?$/i.test(lines[i])) break;
         }
         return null;
     };
