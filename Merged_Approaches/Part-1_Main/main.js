@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 const { spawn } = require("child_process");
-const path = require("path"); // Make sure 'path' is imported
+const path = require("path");
 const fetch = require("node-fetch"); // Ensure node-fetch is imported if not using Node 18+ native fetch
 
 // Load environment variables
@@ -34,7 +34,6 @@ app.use(express.json());
 const htmlGenerators = [
   {
     name: "Approach-1",
-    // Changed path: go up one level, then navigate to Different Approaches
     path: path.join(
       __dirname,
       "..",
@@ -42,11 +41,10 @@ const htmlGenerators = [
       "Approach-1",
       "html_generator.py"
     ),
-    outputKey: "Approach-1_html",
+    outputKey: "Approach-1_html", // This will be the column name
   },
   {
     name: "Approach-2",
-    // Changed path: go up one level, then navigate to Different Approaches
     path: path.join(
       __dirname,
       "..",
@@ -54,11 +52,10 @@ const htmlGenerators = [
       "Approach-2",
       "html_generator.py"
     ),
-    outputKey: "Approach-2_html",
+    outputKey: "Approach-2_html", // This will be the column name
   },
   {
     name: "Approach-5",
-    // Changed path: go up one level, then navigate to Different Approaches
     path: path.join(
       __dirname,
       "..",
@@ -66,18 +63,15 @@ const htmlGenerators = [
       "Approach-5",
       "html_generator.py"
     ),
-    outputKey: "Approach-5_html",
+    outputKey: "Approach-5_html", // This will be the column name
   },
 ];
 
 // --- Helper Functions ---
 
-// The generateHtmlFromPython function only needs creativeId and campaignPrompt
 async function generateHtmlFromPython(scriptPath, creativeId, campaignPrompt) {
   return new Promise((resolve, reject) => {
-    // It's good practice to ensure 'python' is in the system's PATH,
-    // or provide the full path to the Python executable if it's not.
-    const pythonExecutable = "python";
+    const pythonExecutable = "python"; // Or provide full path like '/usr/bin/python3'
 
     console.log(
       `Executing Python script: ${scriptPath} with creativeId: ${creativeId} and campaignPrompt: "${campaignPrompt}"`
@@ -86,7 +80,7 @@ async function generateHtmlFromPython(scriptPath, creativeId, campaignPrompt) {
     const pythonProcess = spawn(pythonExecutable, [
       scriptPath,
       creativeId,
-      campaignPrompt, // Pass campaignPrompt as the second argument
+      campaignPrompt,
     ]);
 
     let stdout = "";
@@ -127,6 +121,25 @@ async function generateHtmlFromPython(scriptPath, creativeId, campaignPrompt) {
   });
 }
 
+// Helper function to get campaign prompt
+async function getCampaignPromptFromDb(campaignId) {
+  try {
+    const { data, error } = await supabase
+      .from("campaigns_duplicate")
+      .select("campaign_prompt")
+      .eq("campaign_id", campaignId)
+      .single();
+    if (error) {
+      console.error(`Error fetching campaign prompt for ${campaignId}:`, error);
+      return null;
+    }
+    return data ? data.campaign_prompt : null;
+  } catch (e) {
+    console.error(`Exception fetching campaign prompt for ${campaignId}:`, e);
+    return null;
+  }
+}
+
 // --- CONSOLIDATED API ENDPOINT ---
 app.post("/api/generate-full-creative", async (req, res) => {
   const { creative_id } = req.body;
@@ -164,11 +177,9 @@ app.post("/api/generate-full-creative", async (req, res) => {
       console.error(
         `❌ Campaign prompt not found for campaign ID ${campaign_id}`
       );
-      return res
-        .status(404)
-        .json({
-          error: `Campaign prompt not found for campaign ID ${campaign_id}.`,
-        });
+      return res.status(404).json({
+        error: `Campaign prompt not found for campaign ID ${campaign_id}.`,
+      });
     }
 
     console.log(
@@ -188,7 +199,7 @@ app.post("/api/generate-full-creative", async (req, res) => {
         generatedHtml = await generateHtmlFromPython(
           generator.path,
           creative_id,
-          campaignPrompt // Only creative_id and campaign_prompt are passed
+          campaignPrompt
         );
         console.log(
           `✅ HTML generation for ${generator.name} completed successfully.`
@@ -211,9 +222,37 @@ app.post("/api/generate-full-creative", async (req, res) => {
       htmlOutputs[result.key] = result.html;
     });
 
+    // --- NEW: Step to save generated HTMLs to Supabase ---
+    console.log(
+      `Attempting to save generated HTMLs for creative_id: ${creative_id} to Supabase.`
+    );
+    console.log("HTML Outputs to save:", Object.keys(htmlOutputs)); // Log keys being saved
+
+    const { data: updateData, error: updateError } = await supabase
+      .from("creatives_duplicate")
+      .update(htmlOutputs) // htmlOutputs object directly maps to column_name: value
+      .eq("creative_id", creative_id);
+
+    if (updateError) {
+      console.error(
+        `❌ Error saving HTML outputs to Supabase for creative_id ${creative_id}:`,
+        updateError.message
+      );
+      // You might choose to still send the HTML outputs even if saving to DB fails,
+      // or to return an error depending on your application's requirements.
+    } else {
+      console.log(
+        `✅ Successfully saved HTML outputs to Supabase for creative_id ${creative_id}.`
+      );
+    }
+
     // Final Response
     res.json({
       ...htmlOutputs,
+      message: updateError
+        ? "HTMLs generated, but failed to save to database."
+        : "HTMLs generated and saved successfully.",
+      dbSaveError: updateError ? updateError.message : null,
     });
   } catch (error) {
     console.error("❌ Error in /api/generate-full-creative endpoint:", error);
@@ -222,25 +261,6 @@ app.post("/api/generate-full-creative", async (req, res) => {
       .json({ error: "Internal server error during creative generation." });
   }
 });
-
-// Helper function to get campaign prompt
-async function getCampaignPromptFromDb(campaignId) {
-  try {
-    const { data, error } = await supabase
-      .from("campaigns_duplicate")
-      .select("campaign_prompt")
-      .eq("campaign_id", campaignId)
-      .single();
-    if (error) {
-      console.error(`Error fetching campaign prompt for ${campaignId}:`, error);
-      return null;
-    }
-    return data ? data.campaign_prompt : null;
-  } catch (e) {
-    console.error(`Exception fetching campaign prompt for ${campaignId}:`, e);
-    return null;
-  }
-}
 
 app.listen(port, () => {
   console.log(`🚀 Server running at http://localhost:${port}`);
