@@ -54,17 +54,17 @@ const htmlGenerators = [
     ),
     outputKey: "Approach-2_html", // This will be the column name
   },
-  {
-    name: "Approach-5",
-    path: path.join(
-      __dirname,
-      "..",
-      "Different Approaches",
-      "Approach-5",
-      "html_generator.py"
-    ),
-    outputKey: "Approach-5_html", // This will be the column name
-  },
+  // {
+  //   name: "Approach-5",
+  //   path: path.join(
+  //     __dirname,
+  //     "..",
+  //     "Different Approaches",
+  //     "Approach-5",
+  //     "html_generator.py"
+  //   ),
+  //   outputKey: "Approach-5_html", // This will be the column name
+  // },
 ];
 
 // --- Helper Functions ---
