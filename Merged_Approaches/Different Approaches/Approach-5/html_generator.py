@@ -4,6 +4,7 @@ import replicate
 import json
 import cv2
 import easyocr
+import numpy as np # Import numpy for image array handling
 from dotenv import load_dotenv
 import sys
 from supabase import create_client, Client
@@ -26,15 +27,8 @@ except Exception as e:
     print(f"Error initializing Supabase client: {e}", file=sys.stderr)
     sys.exit(1)
 
-# --- Configuration for file paths ---
-# We still define these paths for temporary local storage needed for OpenCV/EasyOCR
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'temp_output') # Changed to temp_output
-FULL_CREATIVE_IMAGE_NAME = "full_creative_temp.jpg" # Temporary name
-CLEAN_BACKGROUND_IMAGE_NAME = "clean_background_temp.jpg" # Temporary name
-
-FULL_CREATIVE_IMAGE_PATH = os.path.join(OUTPUT_DIR, FULL_CREATIVE_IMAGE_NAME)
-CLEAN_BACKGROUND_IMAGE_PATH = os.path.join(OUTPUT_DIR, CLEAN_BACKGROUND_IMAGE_NAME)
-# FINAL_HTML_NAME and FINAL_HTML_PATH are removed as HTML will be returned directly
+# --- Configuration for file paths (REMOVED as files will be handled in memory) ---
+# OUTPUT_DIR, FULL_CREATIVE_IMAGE_NAME, CLEAN_BACKGROUND_IMAGE_NAME, etc., are removed.
 
 REPLICATE_MODEL = "black-forest-labs/flux-kontext-pro"
 
@@ -48,24 +42,29 @@ except Exception as e:
     print("Please ensure necessary EasyOCR dependencies are met, or try running 'pip install easyocr'", file=sys.stderr)
     sys.exit(1)
 
-# Ensure the temporary output directory exists
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 # --- Helper Functions ---
 
-def download_image(image_url, save_path):
-    """Downloads an image from a URL and saves it locally."""
-    print(f"Downloading image from {image_url} to {save_path}...", file=sys.stderr)
+def download_image_to_memory(image_url: str) -> np.ndarray:
+    """
+    Downloads an image from a URL directly into memory as a NumPy array.
+    This replaces the previous download_image that saved to disk.
+    """
+    print(f"Downloading image from {image_url} to memory...", file=sys.stderr)
     try:
         response = requests.get(image_url)
-        response.raise_for_status()
-        with open(save_path, 'wb') as f:
-            f.write(response.content)
-        print(f"Image saved to {save_path}", file=sys.stderr)
-        return True
+        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        image_array = np.frombuffer(response.content, np.uint8)
+        img_np = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        if img_np is None:
+            raise ValueError(f"Could not decode image from URL: {image_url}")
+        print(f"Image downloaded and decoded into memory. Shape: {img_np.shape}", file=sys.stderr)
+        return img_np
     except requests.exceptions.RequestException as e:
         print(f"Failed to download image from {image_url}: {e}", file=sys.stderr)
-        return False
+        raise
+    except ValueError as e:
+        print(f"Failed to decode image from {image_url}: {e}", file=sys.stderr)
+        raise
 
 def get_font_size_px(size_str):
     """Converts a descriptive font size string to an approximate pixel value."""
@@ -288,6 +287,7 @@ def generate_full_creative(replicate_client, creative_data):
     """
     Generates the initial full creative image with all elements using a Replicate model.
     This image will then be used for OCR to determine text positions.
+    Returns the image URL and the image as a NumPy array (in-memory).
     """
     print("\n--- Phase 1: Generating Full Creative Image with AI ---", file=sys.stderr)
     print(f"Input creative_data for Replicate generation: {json.dumps(creative_data, indent=2)}", file=sys.stderr)
@@ -422,57 +422,45 @@ def generate_full_creative(replicate_client, creative_data):
 
     print(f"Replicate returned full creative image URL: {output_url}", file=sys.stderr)
 
-    # Image is downloaded temporarily for OCR, will be deleted later
-    if not download_image(output_url, FULL_CREATIVE_IMAGE_PATH):
-        raise Exception("Failed to download full creative image for OCR processing.")
+    # Download image directly to memory for OCR processing
+    full_creative_image_np = download_image_to_memory(output_url)
 
-    return output_url
+    return output_url, full_creative_image_np
 
 # ------------------------------------------------------
 # Phase 2: Generate Clean Background Image (NO LONGER USED for *new* generation)
 # ------------------------------------------------------
-# This function is now simplified to just return the full_creative_url
-# and ensure a local copy exists for OCR, consistent with the "no new generation"
-# requirement for the clean background.
-def generate_clean_background(full_creative_image_url: str):
+def get_clean_background_url(full_creative_image_url: str):
     """
-    This function no longer generates a clean background image via a separate Replicate call.
-    It now simply returns the full_creative_image_url as the 'clean' background,
-    and ensures this image is available locally for potential use by OpenCV/EasyOCR.
+    This function simply returns the full_creative_image_url as the 'clean' background.
+    No separate generation or local saving occurs here.
     """
-    print("\n--- Phase 2: Using Full Creative Image as 'Clean Background' ---", file=sys.stderr)
-    
-    # To maintain consistency with the old "clean_background_url" logic, we will download
-    # the full creative image to CLEAN_BACKGROUND_IMAGE_PATH if it's not already there.
-    # This is primarily for the OCR step that expects a local path.
-    if not os.path.exists(CLEAN_BACKGROUND_IMAGE_PATH):
-        if not download_image(full_creative_image_url, CLEAN_BACKGROUND_IMAGE_PATH):
-            print("Warning: Failed to copy full creative image to CLEAN_BACKGROUND_IMAGE_PATH. This might affect local debugging or subsequent steps relying on this path.", file=sys.stderr)
-            
+    print("\n--- Phase 2: Using Full Creative Image URL as 'Clean Background' for HTML ---", file=sys.stderr)
     print(f"Using full creative image URL as clean background: {full_creative_image_url}", file=sys.stderr)
     return full_creative_image_url
 
 # ------------------------------------------------------
 # Phase 3: Extract Text Positions using EasyOCR
 # ------------------------------------------------------
-def extract_text_positions(image_path):
+def extract_text_positions(image_np_array: np.ndarray):
     """
-    Extracts text and their bounding box positions from an image using EasyOCR,
-    and visualizes these bounding boxes on a debug image.
+    Extracts text and their bounding box positions from an image (NumPy array) using EasyOCR.
+    No debug image is saved to disk.
     """
-    print(f"\n--- Phase 3: Extracting text positions with EasyOCR from {image_path} ---", file=sys.stderr)
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"Error: Could not load image at {image_path} for OCR. Ensure it was downloaded correctly.", file=sys.stderr)
-        raise FileNotFoundError(f"Could not load image at {image_path} for OCR.")
+    print(f"\n--- Phase 3: Extracting text positions with EasyOCR from in-memory image ---", file=sys.stderr)
+    
+    if image_np_array is None or image_np_array.size == 0:
+        print("Error: Empty or invalid image_np_array provided for OCR.", file=sys.stderr)
+        raise ValueError("Invalid image data for OCR.")
 
-    print(f"Image loaded for OCR: {image_path}", file=sys.stderr)
-    results = reader.readtext(img)
+    print(f"Image (NumPy array) loaded for OCR. Shape: {image_np_array.shape}", file=sys.stderr)
+    results = reader.readtext(image_np_array)
     print(f"Raw EasyOCR results: {results}", file=sys.stderr)
 
-
     ocr_boxes = []
-    debug_img = img.copy()
+    
+    # Removed debug_img creation and drawing as we are not saving it
+    # debug_img = image_np_array.copy() 
 
     for (bbox, text, conf) in results:
         x_coords = [p[0] for p in bbox]
@@ -493,16 +481,17 @@ def extract_text_positions(image_path):
                 'conf': conf
             })
 
-            # Draw bounding box and text for debugging, this will be saved
-            cv2.rectangle(debug_img, (x, y), (x + width, y + height), (0, 255, 0), 2)
-            cv2.putText(debug_img, f"{text.strip()} ({conf:.2f})", (x, y - 5),
-                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+            # Removed drawing for debugging purposes to avoid saving a file
+            # cv2.rectangle(debug_img, (x, y), (x + width, y + height), (0, 255, 0), 2)
+            # cv2.putText(debug_img, f"{text.strip()} ({conf:.2f})", (x, y - 5),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
 
     ocr_boxes.sort(key=lambda b: (b['y'], b['x']))
 
-    debug_output_path = os.path.join(OUTPUT_DIR, "easyocr_debug_image.jpg")
-    cv2.imwrite(debug_output_path, debug_img)
-    print(f"EasyOCR debug image with bounding boxes saved to {debug_output_path}", file=sys.stderr)
+    # Removed saving of debug image
+    # debug_output_path = os.path.join(OUTPUT_DIR, "easyocr_debug_image.jpg")
+    # cv2.imwrite(debug_output_path, debug_img)
+    # print(f"EasyOCR debug image with bounding boxes saved to {debug_output_path}", file=sys.stderr)
 
     print("Detected text elements (from EasyOCR):", ocr_boxes, file=sys.stderr)
     if not ocr_boxes:
@@ -512,7 +501,7 @@ def extract_text_positions(image_path):
 # ------------------------------------------------------
 # Phase 4: Generate HTML with Original Background and OCR Text Positions
 # ------------------------------------------------------
-def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: list, creative_data: dict):
+def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: list, creative_data: dict, actual_creative_image_np: np.ndarray):
     """
     Generates the final HTML creative using the background URL gathered from Supabase
     and OCR-detected text positions. It verifies the actual dimensions
@@ -524,22 +513,19 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
     print(f"HTML generation input - ocr_boxes: {ocr_boxes}", file=sys.stderr)
     print(f"HTML generation input - creative_data dimensions: {creative_data.get('dimensions')}", file=sys.stderr)
 
-
     requested_dimensions = creative_data.get("dimensions", {"width": 1080, "height": 1920})
     requested_width = requested_dimensions.get("width", 1080)
     requested_height = requested_dimensions.get("height", 1920)
 
-    # Use the full creative image that was generated by Replicate for dimension verification
-    # This image is expected to be present temporarily for OCR
-    actual_img = cv2.imread(FULL_CREATIVE_IMAGE_PATH)
-    if actual_img is None:
-        print(f"Warning: Could not load the generated image at {FULL_CREATIVE_IMAGE_PATH} to verify dimensions. Using requested dimensions for HTML.", file=sys.stderr)
+    # Use the in-memory image to verify dimensions
+    if actual_creative_image_np is None or actual_creative_image_np.size == 0:
+        print(f"Warning: In-memory generated image is invalid. Using requested dimensions for HTML ({requested_width}x{requested_height}).", file=sys.stderr)
         actual_creative_height = requested_height
         actual_creative_width = requested_width
     else:
-        actual_creative_height, actual_creative_width, _ = actual_img.shape
+        actual_creative_height, actual_creative_width, _ = actual_creative_image_np.shape
         print(f"Requested creative dimensions (from JSON): {requested_width}x{requested_height}px", file=sys.stderr)
-        print(f"Actual AI-generated image dimensions (from {FULL_CREATIVE_IMAGE_NAME}): {actual_creative_width}x{actual_creative_height}px", file=sys.stderr)
+        print(f"Actual AI-generated image dimensions (from in-memory image): {actual_creative_width}x{actual_creative_height}px", file=sys.stderr)
 
         if actual_creative_width != requested_width or actual_creative_height != requested_height:
             print(f"Dimension Mismatch: AI generated image ({actual_creative_width}x{actual_creative_height}) differs from requested ({requested_width}x{requested_height}). HTML container will use actual dimensions.", file=sys.stderr)
@@ -693,37 +679,22 @@ def main():
             print("Warning: 'Canvas.Imagery.background_image_url' is missing or malformed in the mapped data. The HTML will use a blank background.", file=sys.stderr)
             # Allow the flow to continue, the HTML generation will handle an empty URL
 
-        # Phase 1: Generate the full creative image using Replicate (for OCR)
-        # This function also downloads the image temporarily to FULL_CREATIVE_IMAGE_PATH
-        full_creative_url = generate_full_creative(replicate_client, creative_data_for_processing["required_elements"])
+        # Phase 1: Generate the full creative image using Replicate.
+        # This now returns both the URL and the image as a NumPy array (in-memory).
+        full_creative_url, full_creative_image_np = generate_full_creative(replicate_client, creative_data_for_processing["required_elements"])
 
-        # Phase 2: Generate the clean background image (if needed). 
-        # This function now only ensures the full creative image is available locally for OCR.
-        clean_background_url = generate_clean_background(full_creative_url)
+        # Phase 2: Get the clean background URL (which is just the full creative URL)
+        clean_background_url = get_clean_background_url(full_creative_url)
 
-        # Phase 3: Extract text positions from the full creative image using EasyOCR
-        # This step requires the image to be available locally
-        ocr_boxes = extract_text_positions(FULL_CREATIVE_IMAGE_PATH)
+        # Phase 3: Extract text positions from the in-memory full creative image using EasyOCR
+        ocr_boxes = extract_text_positions(full_creative_image_np)
 
-        # Phase 4: Generate HTML with the clean background URL and OCR positions
-        # The HTML is now returned as a string, not saved to a file.
-        html_content = generate_html_with_ocr_layout(clean_background_url, ocr_boxes, creative_data_for_processing["required_elements"])
+        # Phase 4: Generate HTML with the clean background URL and OCR positions,
+        # passing the in-memory image for dimension verification.
+        html_content = generate_html_with_ocr_layout(clean_background_url, ocr_boxes, creative_data_for_processing["required_elements"], full_creative_image_np)
 
-        # Clean up temporary image files
-        try:
-            if os.path.exists(FULL_CREATIVE_IMAGE_PATH):
-                os.remove(FULL_CREATIVE_IMAGE_PATH)
-                print(f"Removed temporary file: {FULL_CREATIVE_IMAGE_PATH}", file=sys.stderr)
-            if os.path.exists(CLEAN_BACKGROUND_IMAGE_PATH):
-                os.remove(CLEAN_BACKGROUND_IMAGE_PATH)
-                print(f"Removed temporary file: {CLEAN_BACKGROUND_IMAGE_PATH}", file=sys.stderr)
-            # The debug image 'easyocr_debug_image.jpg' remains unless explicitly removed here
-        except Exception as e:
-            print(f"Error cleaning up temporary files: {e}", file=sys.stderr)
-
-
+        # No temporary image files to clean up as they were handled in memory.
         print("\nMulti-stage creative generation pipeline completed successfully!", file=sys.stderr)
-        print(f"Temporary files (if any, e.g., easyocr_debug_image.jpg) are in '{OUTPUT_DIR}'.", file=sys.stderr)
         
         # IMPORTANT: Output the HTML content to stdout so Node.js can capture it
         print(html_content) 
