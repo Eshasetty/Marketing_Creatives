@@ -335,21 +335,10 @@ async function saveCampaignPromptAndCreatives(prompt, aiText) {
         const campaign_id = campaignInsert[0].campaign_id;
         console.log(`✅ Campaign saved with ID: ${campaign_id}`);
 
-        // Step 3: Parse AI output using the section-aware parser
-        console.log("Parsing AI-generated creative text with section-aware parser...");
-        const sectioned = parseSectionedAiText(aiText);
-        const headlineText = sectioned['Title']?.text || "";
-        const subheadText = sectioned['Subtitle 1']?.text || sectioned['Subtitle']?.text || "";
-
-        // Build creative object
-        const creative = {
-            campaign_id,
-            text_blocks: [
-                { type: "headline", text: headlineText, color: "#000000", alignment: "center", case_style: "sentence", font_family: "Inter", font_weight: 400 },
-                { type: "subhead", text: subheadText, color: "#000000", alignment: "center", case_style: "sentence", font_family: "Inter", font_weight: 400 }
-            ],
-            // ...add other fields as needed, or merge with your previous creative object structure...
-        };
+        // Step 3: Parse AI output using the robust structured parser
+        console.log("Parsing AI-generated creative text with structured parser...");
+        const creative = parseStructuredAIText(aiText);
+        creative.campaign_id = campaign_id;
 
         // Clean undefined values
         const cleanedCreative = JSON.parse(JSON.stringify(creative, (key, value) =>
