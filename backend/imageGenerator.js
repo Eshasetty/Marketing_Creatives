@@ -10,162 +10,32 @@ const replicate = new Replicate({
 });
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-/**
- * Improved parseAiTextFields with better regex patterns and debugging
- * @param {string} aiText - The AI-generated creative text
- * @returns {object} Parsed fields object
- */
-function parseAiTextFields(aiText) {
-  console.log('🔍 DEBUG: Parsing aiText:', aiText ? aiText.substring(0, 200) + '...' : 'NULL/UNDEFINED');
-  
-  if (!aiText || typeof aiText !== 'string') {
-    console.error('❌ aiText is null, undefined, or not a string');
-    return getEmptyFieldsObject();
-  }
+// --- DYNAMIC AI TEXT PARSER ---
+function parseDynamicAiText(aiText) {
+  // Remove "APPROACH:" if present
+  const cleanText = aiText.replace(/^APPROACH:?\s*/i, '').trim();
+  const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // Enhanced patterns to match your actual format
-  const patterns = {
-    title: [
-      /Title\s*(?:.*?\n)?text:\s*(.+)/i,
-      /Title:\s*(.+)/i,
-      /^Title:\s*(.+)$/im
-    ],
-    subtitle: [
-      /Subtitle\s*\d*\s*(?:.*?\n)?text:\s*(.+)/i,
-      /Subtitle:\s*(.+)/i,
-      /^Subtitle:\s*(.+)$/im
-    ],
-    // This is the key fix - pattern to match your nested format
-    backgroundDescription: [
-      /Background\s*(?:.*?\n)*?(?:.*?\n)*?description:\s*(.+)/i,
-      /Background.*?description:\s*(.+)/is,
-      /description:\s*(.+)/i
-    ],
-    backgroundColor: [
-      /Background\s*(?:.*?\n)*?color:\s*(.+)/i,
-      /Background.*?color:\s*(.+)/is,
-      /background color:\s*(.+)/i,
-      /Background Color:\s*(.+)/i
-    ],
-    layout: [
-      /Layout\s*(?:.*?\n)*?type:\s*(.+)/i,
-      /Layout.*?type:\s*(.+)/is,
-      /layout:\s*(.+)/i
-    ],
-    decorativeElements: [
-      /Decorative Element:\s*(?:.*?\n)*?shape:\s*(.+)/i,
-      /Decorative Element.*?shape:\s*(.+)/is,
-      /decorative elements:\s*(.+)/i
-    ],
-    overallStyle: [
-      /Style\s*(?:.*?\n)*?type:\s*(.+)/i,
-      /Style.*?type:\s*(.+)/is,
-      /overall style:\s*(.+)/i
-    ],
-    slogan: [
-      /Slogan\s*(?:.*?\n)*?text:\s*(.+)/i,
-      /Slogan.*?text:\s*(.+)/is,
-      /slogan:\s*(.+)/i
-    ],
-    legalDisclaimer: [
-      /Legal Disclaimer:\s*(?:.*?\n)*?text:\s*(.+)/i,
-      /Legal Disclaimer.*?text:\s*(.+)/is,
-      /legal disclaimer:\s*(.+)/i
-    ]
-  };
-
-  const ctaPatterns = {
-    text: [
-      /CTA\s*(?:.*?\n)*?text:\s*(.+)/i,
-      /CTA.*?text:\s*(.+)/is
-    ],
-    url: [
-      /CTA\s*(?:.*?\n)*?url:\s*(.+)/i,
-      /CTA.*?url:\s*(.+)/is
-    ],
-    style: [
-      /CTA\s*(?:.*?\n)*?style:\s*(.+)/i,
-      /CTA.*?style:\s*(.+)/is
-    ],
-    bgColor: [
-      /CTA\s*(?:.*?\n)*?bg_color:\s*(.+)/i,
-      /CTA.*?bg_color:\s*(.+)/is
-    ],
-    textColor: [
-      /CTA\s*(?:.*?\n)*?text_color:\s*(.+)/i,
-      /CTA.*?text_color:\s*(.+)/is
-    ]
-  };
-
-  // Helper function to try multiple patterns
-  function tryPatterns(patterns, text) {
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match && match[1]) {
-        return match[1].trim();
+  const fields = {};
+  for (const line of lines) {
+    // Match "Key: Value" (allowing for colons in the value)
+    const match = line.match(/^([^:]+):\s*(.+)$/);
+    if (match) {
+      const key = match[1].trim();
+      const value = match[2].trim();
+      // Support multiple values for the same key as arrays
+      if (fields[key]) {
+        if (Array.isArray(fields[key])) {
+          fields[key].push(value);
+        } else {
+          fields[key] = [fields[key], value];
+        }
+      } else {
+        fields[key] = value;
       }
     }
-    return '';
   }
-
-  const fields = {
-    title: tryPatterns(patterns.title, aiText),
-    subtitle: tryPatterns(patterns.subtitle, aiText),
-    backgroundDescription: tryPatterns(patterns.backgroundDescription, aiText),
-    backgroundColor: tryPatterns(patterns.backgroundColor, aiText) || '#000000',
-    layout: tryPatterns(patterns.layout, aiText),
-    decorativeElements: tryPatterns(patterns.decorativeElements, aiText),
-    overalStyle: tryPatterns(patterns.overallStyle, aiText),
-    slogan: tryPatterns(patterns.slogan, aiText),
-    legalDisclaimer: tryPatterns(patterns.legalDisclaimer, aiText),
-    cta: {
-      text: tryPatterns(ctaPatterns.text, aiText),
-      url: tryPatterns(ctaPatterns.url, aiText),
-      style: tryPatterns(ctaPatterns.style, aiText) || 'primary',
-      bgColor: tryPatterns(ctaPatterns.bgColor, aiText) || '#FF5733',
-      textColor: tryPatterns(ctaPatterns.textColor, aiText) || '#FFFFFF'
-    }
-  };
-
-  console.log('🔍 DEBUG: Background description extracted:', fields.backgroundDescription);
-  console.log('🔍 DEBUG: All extracted fields:', JSON.stringify(fields, null, 2));
   return fields;
-}
-
-function getEmptyFieldsObject() {
-  return {
-    title: '',
-    subtitle: '',
-    backgroundDescription: '',
-    backgroundColor: '#E6E6FA',
-    layout: '',
-    decorativeElements: '',
-    overallStyle: '',
-    slogan: '',
-    legalDisclaimer: '',
-    cta: {
-      text: '',
-      url: '',
-      style: 'primary',
-      bgColor: '#000000',
-      textColor: '#FFFFFF'
-    }
-  };
-}
-
-function extractBackgroundDescription(aiText) {
-  console.log('🔍 DEBUG: extractBackgroundDescription called with:', aiText ? aiText.substring(0, 100) + '...' : 'NULL/UNDEFINED');
-  
-  const fields = parseAiTextFields(aiText);
-  
-  if (!fields.backgroundDescription) {
-    console.error("❌ Failed to extract background description from aiText");
-    console.error("❌ Available text for debugging:", aiText ? aiText.substring(0, 500) : 'NULL');
-    throw new Error("Background description not found in aiText. Expected format: 'Background Description: ...' or 'background description: ...'");
-  }
-  
-  console.log('✅ Background description extracted successfully:', fields.backgroundDescription);
-  return fields.backgroundDescription;
 }
 
 /**
@@ -173,32 +43,62 @@ function extractBackgroundDescription(aiText) {
  */
 function extractPosterDescription(aiText) {
   console.log('🔍 DEBUG: extractPosterDescription called with:', aiText ? aiText.substring(0, 100) + '...' : 'NULL/UNDEFINED');
-  
-  const fields = parseAiTextFields(aiText);
-  
-  // Build a compact descriptive prompt
+  const fields = parseDynamicAiText(aiText);
+  // Build a compact descriptive prompt using all available fields
   const parts = [];
-
-  if (fields.backgroundDescription) {
-    parts.push(fields.backgroundDescription);
-  } else {
-    throw new Error("Background description not found in aiText. Cannot generate poster without background description.");
+  if (fields['Background Description']) parts.push(fields['Background Description']);
+  if (fields['Decorative Element Shape']) parts.push(`decorative element: ${fields['Decorative Element Shape']}`);
+  if (fields['Decorative Element Color']) parts.push(`decorative color: ${fields['Decorative Element Color']}`);
+  if (fields['Background Color']) parts.push(`background color: ${fields['Background Color']}`);
+  if (fields['Layout']) parts.push(`layout: ${fields['Layout']}`);
+  if (fields['Title'] || fields['Subtitle']) {
+    const textSummary = [fields['Title'], fields['Subtitle']].filter(Boolean).join(' — ');
+    parts.push(`poster text: \"${textSummary}\"`);
   }
-  
-  if (fields.decorativeElements) parts.push(fields.decorativeElements);
-  if (fields.backgroundColor) parts.push(`with a background color of ${fields.backgroundColor}`);
-  if (fields.layout) parts.push(`using a ${fields.layout} layout`);
-  
-  if (fields.title || fields.subtitle) {
-    const textSummary = [fields.title, fields.subtitle].filter(Boolean).join(' — ');
-    parts.push(`poster text: "${textSummary}"`);
+  if (fields['Slogan']) parts.push(`slogan: ${fields['Slogan']}`);
+  if (fields['Legal Disclaimer']) parts.push(`legal: ${fields['Legal Disclaimer']}`);
+  // Add any other fields dynamically
+  for (const [key, value] of Object.entries(fields)) {
+    if (!['Background Description','Decorative Element Shape','Decorative Element Color','Background Color','Layout','Title','Subtitle','Slogan','Legal Disclaimer'].includes(key)) {
+      parts.push(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`);
+    }
   }
-  
-  if (fields.overallStyle) parts.push(`style: ${fields.overallStyle}`);
-
   const result = parts.join(', ');
   console.log('✅ Poster description generated:', result);
   return result;
+}
+
+function extractBackgroundDescription(aiText) {
+  console.log('🔍 DEBUG: extractBackgroundDescription called with:', aiText ? aiText.substring(0, 100) + '...' : 'NULL/UNDEFINED');
+  const lines = aiText.split('\n').map(l => l.trim());
+  let inBackgroundSection = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Background[:]?$/i.test(lines[i])) {
+      inBackgroundSection = true;
+      continue;
+    }
+    if (inBackgroundSection) {
+      // End of section if we hit another top-level section
+      if (/^(Title|Subtitle|Slogan|Legal Disclaimer|CTA|Branding|Layout|Decorative Element)[:]?$/i.test(lines[i])) {
+        break;
+      }
+      // Look for description
+      const match = lines[i].match(/^description:\s*(.+)$/i);
+      if (match) {
+        console.log('✅ Background description extracted successfully:', match[1]);
+        return match[1];
+      }
+    }
+  }
+  // Fallback: try the dynamic parser for any top-level 'Background Description'
+  const fields = parseDynamicAiText(aiText);
+  const desc = fields['Background Description'] || fields['Background description'] || fields['Background'] || '';
+  if (desc) {
+    console.log('✅ Background description extracted successfully (fallback):', desc);
+    return desc;
+  }
+  console.error("❌ Failed to extract background description from aiText");
+  throw new Error("Background description not found in aiText. Expected a line like 'description: ...' under a 'Background' section.");
 }
 
 // Example usage and testing function
@@ -219,22 +119,22 @@ function testBackgroundExtraction(sampleAiText) {
 }
 
 module.exports = {
-  parseAiTextFields,
+  parseDynamicAiText,
   extractBackgroundDescription,
   extractPosterDescription,
   testBackgroundExtraction
 };
 function parseAiTextToCreativeObject(aiText) {
-  const fields = parseAiTextFields(aiText);
+  const fields = parseDynamicAiText(aiText);
   
   const creative = {
     placement: "center",
     dimensions: { width: 1200, height: 800 },
     format: "static",
     background: {
-      color: fields.backgroundColor,
+      color: fields['Background Color'] || '#000000', // Default to black if not found
       type: "solid",
-      description: fields.backgroundDescription
+      description: fields['Background Description'] || '' // Default to empty if not found
     },
     layout_grid: "free",
     bleed_safe_margins: null,
@@ -242,23 +142,23 @@ function parseAiTextToCreativeObject(aiText) {
     cta_buttons: [],
     brand_logo: {},
     brand_colors: [],
-    slogan: fields.slogan,
-    legal_disclaimer: fields.legalDisclaimer,
+    slogan: fields['Slogan'] || '',
+    legal_disclaimer: fields['Legal Disclaimer'] || '',
     decorative_elements: []
   };
 
   // Add text blocks
-  if (fields.title) creative.text_blocks.push({ type: "headline", text: fields.title });
-  if (fields.subtitle) creative.text_blocks.push({ type: "subhead", text: fields.subtitle });
+  if (fields['Title']) creative.text_blocks.push({ type: "headline", text: fields['Title'] });
+  if (fields['Subtitle']) creative.text_blocks.push({ type: "subhead", text: fields['Subtitle'] });
 
   // Add CTA button
-  if (fields.cta.text && fields.cta.url) {
+  if (fields['CTA Text'] && fields['CTA URL']) {
     creative.cta_buttons.push({
-      text: fields.cta.text,
-      url: fields.cta.url,
-      style: fields.cta.style,
-      bg_color: fields.cta.bgColor,
-      text_color: fields.cta.textColor
+      text: fields['CTA Text'],
+      url: fields['CTA URL'],
+      style: fields['CTA Style'] || 'primary',
+      bg_color: fields['CTA Background Color'] || '#FF5733',
+      text_color: fields['CTA Text Color'] || '#FFFFFF'
     });
   }
 
