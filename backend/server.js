@@ -6,6 +6,7 @@ const { createClient } = require('@supabase/supabase-js');
 const OpenAI = require('openai');
 const { generateImagesForCreatives, createEnhancedImagePrompt } = require('./imageGenerator'); // Assuming this file exists
 require('dotenv').config();
+const router = express.Router();
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -372,6 +373,27 @@ async function saveCampaignPromptAndCreatives(prompt, aiText) {
 }
 
 // --- API Endpoints ---
+app.post("/api/previous-creatives", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("creatives_duplicate")
+      .select("imagery");
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    const urls = data
+      .map(row => Array.isArray(row.imagery) && row.imagery[1])
+      .filter(Boolean);
+
+    res.status(200).json({ urls });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 // Endpoint to fetch all existing creatives for user selection display
 app.get('/api/creatives', async (req, res) => {
@@ -424,6 +446,8 @@ app.get('/api/creatives', async (req, res) => {
 app.post('/api/generate', async (req, res) => {
   const { campaignPrompt, selectedCreativeIds = [] } = req.body; // Expect campaignPrompt and optional selectedCreativeIds
   
+  console.log("THIS FILE IS RUNNING");
+
   if (!campaignPrompt) {
     return res.status(400).json({ error: "campaignPrompt is required for generation." });
   }
