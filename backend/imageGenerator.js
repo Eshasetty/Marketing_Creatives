@@ -118,6 +118,30 @@ function testBackgroundExtraction(sampleAiText) {
   return backgrounds;
 }
 
+// Section-aware parser for AI text
+function parseSectionedAiText(aiText) {
+  const lines = aiText.split('\n').map(l => l.trim()).filter(Boolean);
+  const result = {};
+  let currentSection = null;
+
+  for (const line of lines) {
+    // Section header (e.g., Title, Subtitle 1, Slogan, etc.)
+    if (/^(Title|Subtitle 1|Subtitle|Slogan|Legal Disclaimer|CTA|Background|Branding|Layout|Decorative Element)[:]?$/i.test(line)) {
+      currentSection = line.replace(':', '');
+      result[currentSection] = {};
+      continue;
+    }
+    // Subfield (e.g., text: ...)
+    const match = line.match(/^([^:]+):\s*(.+)$/);
+    if (match && currentSection) {
+      const key = match[1].trim();
+      const value = match[2].trim();
+      result[currentSection][key] = value;
+    }
+  }
+  return result;
+}
+
 module.exports = {
   parseDynamicAiText,
   extractBackgroundDescription,
@@ -514,10 +538,11 @@ async function processImageGenerationRequest(requestData) {
 }
 
 module.exports = {
+  parseSectionedAiText,
   generateFluxImageToStorage,
   generateImagesForCreatives,
   processImageGenerationRequest,
   extractBackgroundDescription,
   extractPosterDescription, 
-  parseAiTextToCreativeObject
+  parseAiTextToCreativeObject,
 };

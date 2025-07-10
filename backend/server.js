@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const OpenAI = require('openai');
-const { generateImagesForCreatives, createEnhancedImagePrompt } = require('./imageGenerator'); // Assuming this file exists
+const { generateImagesForCreatives, extractBackgroundDescription, extractPosterDescription, parseDynamicAiText, parseSectionedAiText } = require('./imageGenerator'); // Assuming this file exists
 require('dotenv').config();
 const router = express.Router();
 
@@ -335,12 +335,21 @@ async function saveCampaignPromptAndCreatives(prompt, aiText) {
         const campaign_id = campaignInsert[0].campaign_id;
         console.log(`✅ Campaign saved with ID: ${campaign_id}`);
 
-        // Step 3: Parse AI output using the new structured parser
-        console.log("Parsing AI-generated creative text...");
-        const creative = parseStructuredAIText(aiText);
-        
-        // Add campaign_id to the creative object
-        creative.campaign_id = campaign_id;
+        // Step 3: Parse AI output using the section-aware parser
+        console.log("Parsing AI-generated creative text with section-aware parser...");
+        const sectioned = parseSectionedAiText(aiText);
+        const headlineText = sectioned['Title']?.text || "";
+        const subheadText = sectioned['Subtitle 1']?.text || sectioned['Subtitle']?.text || "";
+
+        // Build creative object
+        const creative = {
+            campaign_id,
+            text_blocks: [
+                { type: "headline", text: headlineText, color: "#000000", alignment: "center", case_style: "sentence", font_family: "Inter", font_weight: 400 },
+                { type: "subhead", text: subheadText, color: "#000000", alignment: "center", case_style: "sentence", font_family: "Inter", font_weight: 400 }
+            ],
+            // ...add other fields as needed, or merge with your previous creative object structure...
+        };
 
         // Clean undefined values
         const cleanedCreative = JSON.parse(JSON.stringify(creative, (key, value) =>
@@ -348,7 +357,6 @@ async function saveCampaignPromptAndCreatives(prompt, aiText) {
         ));
 
         console.log(`🔍 Attempting to save parsed creative data to Supabase:`);
-        
         const { data, error } = await supabase
             .from("creatives_duplicate")
             .insert([cleanedCreative])
