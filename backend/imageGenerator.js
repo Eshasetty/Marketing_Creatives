@@ -222,8 +222,8 @@ async function generateFluxImageToStorage(prompt, creativeId, bucketName = 'crea
     // Step 1: Generate image with Flux model
     const input = {
       prompt: prompt,
-      width: 1024,
-      height: 1024,
+      //width: 1024,
+      //height: 1024,
       num_outputs: 1,
       num_inference_steps: 4, // Flux Schnell is optimized for 4 steps
     };
