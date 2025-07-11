@@ -395,18 +395,21 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
         }}
         .creative-container {{
             position: relative;
-            width: {creative_width}px;
-            height: {creative_height}px;
+            width: 100%; /* Make it fill the iframe's width */
+            padding-bottom: calc(100% * ({creative_height} / {creative_width})); /* Maintain aspect ratio dynamically */
+            /* OR, for a fixed 3:4 aspect ratio, you could use: padding-bottom: 133.33%; */
             overflow: hidden;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             border-radius: 8px;
             background-color: #ffffff;
+            /* Ensure children respect the padded container */
+            transform-origin: top left;
         }}
         .creative-image {{
             position: absolute;
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: cover; /* or contain, depending on desired image fitting */
             top: 0;
             left: 0;
         }}
@@ -499,21 +502,37 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
         width_val = min(width_val, creative_width - left_pos)
         height_val = min(height_val, creative_height - top_pos)
 
+        # Convert pixel values to percentages relative to the creative_width and creative_height
+        # Ensure creative_width and creative_height are not zero to avoid division by zero
+        current_creative_width = creative_width if creative_width > 0 else 1
+        current_creative_height = creative_height if creative_height > 0 else 1
+
+        left_percent = (left_pos / current_creative_width) * 100
+        top_percent = (top_pos / current_creative_height) * 100
+        width_percent = (width_val / current_creative_width) * 100
+        height_percent = (height_val / current_creative_height) * 100
+
+        # Font size often needs to be relative to the width for responsive scaling
+        # Let's try `vw` based on the creative container's effective width.
+        font_size_vw = (font_size / current_creative_width) * 100 # Convert absolute px font size to vw
+
         if is_cta:
-            style = (f"left: {left_pos}px; top: {top_pos}px; "
-                     f"width: {width_val}px; height: {height_val}px; "
-                     f"font-size: {font_size}px; "
+            style = (f"left: {left_percent}%; top: {top_percent}%; "
+                     f"width: {width_percent}%; height: {height_percent}%; "
+                     f"font-size: {font_size_vw}vw; " # Use vw for font size
                      f"background-color: {cta_bg_color}; color: {cta_text_color};")
             html_content += f"""        <a href="{cta_url}" class="cta-button" style="{style}" data-x="{box['x']}" data-y="{box['y']}">{text_content}</a>\n"""
         else:
-            style = (f"left: {left_pos}px; top: {top_pos}px; "
-                     f"width: {width_val}px; height: {height_val}px; "
-                     f"font-size: {font_size}px;")
+            style = (f"left: {left_percent}%; top: {top_percent}%; "
+                     f"width: {width_percent}%; height: {height_percent}%; "
+                     f"font-size: {font_size_vw}vw;") # Use vw for font size
             html_content += f"""        <div class="overlay-text" style="{style}" data-x="{box['x']}" data-y="{box['y']}">{text_content}</div>\n"""
 
     html_content += """    </div>\n</body>\n</html>"""
     print("Generated HTML content string.", file=sys.stderr)
     return html_content
+
+# Rest of your code (main function, etc.) remains unchanged.
 
 # ------------------------------------------------------
 # Main Orchestration Process
