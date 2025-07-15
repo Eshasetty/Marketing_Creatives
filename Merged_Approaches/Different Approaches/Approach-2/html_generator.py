@@ -417,7 +417,7 @@ def generate_html_with_ocr_layout(final_html_background_url: str, ocr_boxes: lis
             position: absolute;
             font-weight: bold;
             color: #000000;
-            background: rgba(255, 255, 255, 0.7); /* Keep background for visibility for now */
+            background: transparent; /* Keep background for visibility for now */
             padding: 2px 5px;
             border-radius: 3px;
             text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
